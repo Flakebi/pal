@@ -585,12 +585,9 @@ Result PipelineUploader::Begin(
     auto sections = elfProcessor->GetSections();
     for (uint32 i = 0; i < sections->NumSections(); i++)
     {
-        // TODO Only use .text and .data section for now
-        if (i != abiProcessor.GetTextSection()->GetIndex()
-            && (dataLength == 0 || i != abiProcessor.GetDataSection()->GetIndex()))
-            continue;
-
         auto section = sections->Get(i);
+        uint32 flags = section->GetSectionHeader()->sh_flags;
+        if ((flags & Elf::ShfWrite) || (flags & Elf::ShfExecInstr))
         mapping.AddSection(section);
     }
     createInfo.size = mapping.GetSize();
@@ -640,16 +637,12 @@ Result PipelineUploader::Begin(
             m_pMappedPtr = VoidPtrInc(m_pMappedPtr, static_cast<size_t>(m_baseOffset));
 
             // Copy sections
-            for (uint32 i = 0; i < sections->NumSections(); i++)
+            for (uint32 i = 0; i < mapping.GetNumSections(); i++)
             {
-                // TODO Only use .text and .data section for now
-                if (i != abiProcessor.GetTextSection()->GetIndex()
-                    && (dataLength == 0 || i != abiProcessor.GetDataSection()->GetIndex()))
-                    continue;
-
-                auto section = sections->Get(i);
+                uint32 sectionIndex = mapping.GetSectionIndex(i);
+                auto section = sections->Get(sectionIndex);
                 gpusize offset;
-                result = mapping.GetSectionOffset(i, &offset);
+                result = mapping.GetSectionOffset(sectionIndex, &offset);
                 if (result != Result::Success)
                     return result;
 

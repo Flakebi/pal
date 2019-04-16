@@ -85,6 +85,7 @@ public:
     }
 
     uint32 GetNumSections() const { return m_sections.size(); }
+    uint32 GetSectionIndex(size_t i) const { return m_sections[i].id; }
     uint64 GetAlignment() const { return m_alignment; }
     gpusize GetFlags() const { return m_flags; }
     gpusize GetSize() const { return m_size; }
