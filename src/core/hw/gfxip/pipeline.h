@@ -138,6 +138,7 @@ protected:
     Pipeline(Device* pDevice, bool isInternal);
 
     bool IsInternal() const { return m_flags.isInternal != 0; }
+    void PrintData();
 
     Result PerformRelocationsAndUploadToGpuMemory(
         const AbiProcessor&       abiProcessor,
@@ -174,6 +175,8 @@ protected:
 
     BoundGpuMemory  m_gpuMem;
     gpusize         m_gpuMemSize;
+    size_t          m_dataOffset;
+    size_t          m_dataLength;
 
     void*   m_pPipelineBinary;      // Buffer containing the pipeline binary data (Pipeline ELF ABI).
     size_t  m_pipelineBinaryLen;    // Size of the pipeline binary data, in bytes.
@@ -232,6 +235,9 @@ public:
     gpusize PrefetchAddr() const { return m_prefetchGpuVirtAddr; }
     gpusize PrefetchSize() const { return m_prefetchSize; }
 
+    size_t DataOffset() const { return m_dataOffset; }
+    size_t DataLength() const { return m_dataLength; }
+
 protected:
     // Writes a context register offset and value to the mapped region where registers are stored in GPU memory.
     PAL_INLINE void AddCtxRegister(uint16 offset, uint32 value)
@@ -265,6 +271,8 @@ private:
     const uint32  m_shRegisterCount;
     const uint32  m_ctxRegisterCount;
 
+    size_t   m_dataOffset;
+    size_t   m_dataLength;
     void*    m_pMappedPtr;
     uint32*  m_pCtxRegWritePtr;
     uint32*  m_pShRegWritePtr;

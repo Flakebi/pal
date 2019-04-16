@@ -30,6 +30,7 @@
 #include "core/hw/gfxip/pipeline.h"
 #include "palFile.h"
 #include "palPipelineAbiProcessorImpl.h"
+#include "pipelineGpuMapping.h"
 
 #include "core/devDriverUtil.h"
 
@@ -77,6 +78,8 @@ Pipeline::Pipeline(
     m_pDevice(pDevice),
     m_gpuMem(),
     m_gpuMemSize(0),
+    m_dataLength(0),
+    m_dataOffset(0),
     m_pPipelineBinary(nullptr),
     m_pipelineBinaryLen(0),
     m_apiHwMapping()
@@ -96,11 +99,48 @@ Pipeline::~Pipeline()
 {
     if (m_gpuMem.IsBound())
     {
+        if (!IsInternal())
+        {
+            printf("Destroying pipeline\n");
+            PrintData();
+        }
         m_pDevice->MemMgr()->FreeGpuMem(m_gpuMem.Memory(), m_gpuMem.Offset());
         m_gpuMem.Update(nullptr, 0);
     }
 
     PAL_SAFE_FREE(m_pPipelineBinary, m_pDevice->GetPlatform());
+}
+
+// =====================================================================================================================
+void Pipeline::PrintData()
+{
+    if (m_gpuMem.IsBound())
+    {
+        if (m_dataLength > 0)
+        {
+            void *pMappedPtr;
+            Result result = m_gpuMem.Map(&pMappedPtr);
+            if (result == Result::Success)
+            {
+                pMappedPtr = VoidPtrInc(pMappedPtr, m_dataOffset);
+                char *local_data = (char*)malloc(m_dataLength);
+                memcpy(local_data, pMappedPtr, m_dataLength);
+                m_gpuMem.Unmap();
+
+                for (size_t i = 0; i < m_dataLength; i++)
+                {
+                    printf("0x%hhx, ", local_data[i]);
+                }
+                puts("\n");
+
+                free(local_data);
+            }
+            else
+            {
+                printf("Failed to map memory\n");
+            }
+        }
+    }
 }
 
 // =====================================================================================================================
@@ -130,6 +170,13 @@ Result Pipeline::PerformRelocationsAndUploadToGpuMemory(
     {
         m_gpuMemSize = pUploader->GpuMemSize();
         m_gpuMem.Update(pUploader->GpuMem(), pUploader->GpuMemOffset());
+        m_dataOffset = pUploader->DataOffset();
+        m_dataLength = pUploader->DataLength();
+        if (!IsInternal())
+        {
+            printf("Uploaded pipeline\n");
+            PrintData();
+        }
     }
 
     return result;
@@ -473,6 +520,8 @@ PipelineUploader::PipelineUploader(
     m_shRegGpuVirtAddr(0),
     m_shRegisterCount(shRegisterCount),
     m_ctxRegisterCount(ctxRegisterCount),
+    m_dataOffset(0),
+    m_dataLength(0),
     m_pMappedPtr(nullptr),
     m_pCtxRegWritePtr(nullptr),
     m_pShRegWritePtr(nullptr)
@@ -525,21 +574,26 @@ Result PipelineUploader::Begin(
     GpuMemoryInternalCreateInfo internalInfo = { };
     internalInfo.flags.alwaysResident = 1;
 
-    const void* pCodeBuffer = nullptr;
-    size_t      codeLength  = 0;
-    abiProcessor.GetPipelineCode(&pCodeBuffer, &codeLength);
-
-    createInfo.size = codeLength;
-
     const void* pDataBuffer   = nullptr;
     size_t      dataLength    = 0;
     gpusize     dataAlignment = 0;
     abiProcessor.GetData(&pDataBuffer, &dataLength, &dataAlignment);
 
-    if (dataLength > 0)
+    // For now, have one segment containing all sections
+    PipelineSectionSegmentMapping mapping(0);
+    auto *elfProcessor = abiProcessor.GetElfProcessor();
+    auto sections = elfProcessor->GetSections();
+    for (uint32 i = 0; i < sections->NumSections(); i++)
     {
-        createInfo.size = (Pow2Align(createInfo.size, dataAlignment) + dataLength);
+        // TODO Only use .text and .data section for now
+        if (i != abiProcessor.GetTextSection()->GetIndex()
+            && (dataLength == 0 || i != abiProcessor.GetDataSection()->GetIndex()))
+            continue;
+
+        auto section = sections->Get(i);
+        mapping.AddSection(section);
     }
+    createInfo.size = mapping.GetSize();
 
     const uint32 totalRegisters = (m_ctxRegisterCount + m_shRegisterCount);
     if (totalRegisters > 0)
@@ -570,6 +624,7 @@ Result PipelineUploader::Begin(
     // shaderPrefetchBytes is set from "SQC_CONFIG.INST_PRF_COUNT" (gfx8-9)
     // defaulting to the hardware supported maximum if necessary
 
+    size_t codeLength = abiProcessor.GetTextSection()->GetDataSize();
     const gpusize minSafeSize = Pow2Align(codeLength, ShaderICacheLineSize) +
                                 pDevice->ChipProperties().gfxip.shaderPrefetchBytes;
 
@@ -584,25 +639,51 @@ Result PipelineUploader::Begin(
             m_gpuMemSize = createInfo.size;
             m_pMappedPtr = VoidPtrInc(m_pMappedPtr, static_cast<size_t>(m_baseOffset));
 
+            // Copy sections
+            for (uint32 i = 0; i < sections->NumSections(); i++)
+            {
+                // TODO Only use .text and .data section for now
+                if (i != abiProcessor.GetTextSection()->GetIndex()
+                    && (dataLength == 0 || i != abiProcessor.GetDataSection()->GetIndex()))
+                    continue;
+
+                auto section = sections->Get(i);
+                gpusize offset;
+                result = mapping.GetSectionOffset(i, &offset);
+                if (result != Result::Success)
+                    return result;
+
+                void* pMappedPtr = VoidPtrInc(m_pMappedPtr, static_cast<size_t>(offset));
+                memcpy(pMappedPtr, section->GetData(), section->GetDataSize());
+            }
+
             gpusize gpuVirtAddr = (m_pGpuMemory->Desc().gpuVirtAddr + m_baseOffset);
-            void*   pMappedPtr  = m_pMappedPtr;
+            void* pMappedPtr = m_pMappedPtr;
 
-            m_codeGpuVirtAddr = gpuVirtAddr;
-            memcpy(pMappedPtr, pCodeBuffer, codeLength);
-
-            pMappedPtr   = VoidPtrInc(pMappedPtr, codeLength);
-            gpuVirtAddr += codeLength;
-
+            // Find offset of .text section
+            auto textSection = abiProcessor.GetTextSection();
+            uint32 sectionIndex = textSection->GetIndex();
+            gpusize offset;
+            result = mapping.GetSectionOffset(sectionIndex, &offset);
+            if (result != Result::Success)
+                return result;
+            m_codeGpuVirtAddr     = gpuVirtAddr + offset;
             m_prefetchGpuVirtAddr = m_codeGpuVirtAddr;
-            m_prefetchSize        = codeLength;
+            m_prefetchSize        = textSection->GetDataSize();
 
+            m_dataLength = dataLength;
             if (dataLength > 0)
             {
-                pMappedPtr  = VoidPtrAlign(pMappedPtr, static_cast<size_t>(dataAlignment));
-                gpuVirtAddr = Pow2Align(gpuVirtAddr, dataAlignment);
+                // Find offset of .data section
+                auto dataSection = abiProcessor.GetDataSection();
+                sectionIndex = dataSection->GetIndex();
+                result = mapping.GetSectionOffset(sectionIndex, &offset);
+                if (result != Result::Success)
+                    return result;
+                m_dataGpuVirtAddr = gpuVirtAddr + offset;
+                m_dataOffset = offset;
 
-                m_dataGpuVirtAddr = gpuVirtAddr;
-                memcpy(pMappedPtr, pDataBuffer, dataLength);
+                pMappedPtr  = VoidPtrInc(m_pMappedPtr, static_cast<size_t>(offset));
 
                 // The for loop which follows is entirely non-standard behavior for an ELF loader, but is intended to
                 // only be temporary code.
@@ -625,12 +706,13 @@ Result PipelineUploader::Begin(
                 } // for each hardware stage
                 // End temporary code
 
-                pMappedPtr   = VoidPtrInc(pMappedPtr, dataLength);
-                gpuVirtAddr += dataLength;
-
-                m_prefetchSize = gpuVirtAddr - m_prefetchGpuVirtAddr;
+                // gpuVirtAddr points to end of data
+                // TODO What is with m_prefetchSize?
+                //m_prefetchSize = gpuVirtAddr - m_prefetchGpuVirtAddr;
             } // if dataLength > 0
 
+            pMappedPtr = VoidPtrInc(m_pMappedPtr, static_cast<size_t>(mapping.GetSize()));
+            gpuVirtAddr += mapping.GetSize();
             if (totalRegisters > 0)
             {
                 gpusize regGpuVirtAddr = Pow2Align(gpuVirtAddr, sizeof(uint32));

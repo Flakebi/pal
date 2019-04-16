@@ -318,14 +318,21 @@ public:
 
     /// Apply relocations to the Code, Data, or ReadOnly Data.
     ///
-    /// @param [in] pBuffer        Pointer to the buffer to apply relocations to.
+    /// pSrcBuffer will be used for reading and pDstBuffer for writing. They are
+    /// allowed to point to the same memory.
+    /// Usually, pSrcBuffer points to the loaded elf object and pDstBuffer to
+    /// the elf object in GPU memory. The reason is, reading from CPU memory is
+    /// a lot faster than reading from GPU memory.
+    ///
+    /// @param [in] pSrcBuffer     Pointer to the read-only buffer to apply relocations to.
+    /// @param [in] pDstBuffer     Pointer to the buffer where the relocations will written.
     /// @param [in] bufferSize     Size of the buffer in bytes to apply relocations to.
     /// @param [in] AbiSectionType The ABI section type to apply relocations to.
-    void ApplyRelocations(
-        void*          pBuffer,
+    Result ApplyRelocations(
+        void*          pSrcBuffer,
+        void*          pDstBuffer,
         size_t         bufferSize,
-        AbiSectionType sectionType,
-        uint64         baseAddress) const;
+        AbiSectionType sectionType) const;
 
     /// Finalizes the ABI filling out all the elf structures. Call this and
     /// make custom changes with the returned ElfProcessor before calling
@@ -345,6 +352,11 @@ public:
     ///
     /// @returns A pointer to an ElfProcessor to allow additional queries.
     const Elf::ElfProcessor<Allocator>* GetElfProcessor() const { return &m_elfProcessor; }
+
+    Elf::Section<Allocator>* GetTextSection() { return m_pTextSection; }
+    const Elf::Section<Allocator>* GetTextSection() const { return m_pTextSection; }
+    Elf::Section<Allocator>* GetDataSection() { return m_pDataSection; }
+    const Elf::Section<Allocator>* GetDataSection() const { return m_pDataSection; }
 
     /// Gets the number of bytes required to hold a binary blob of the ELF.
     ///
@@ -371,8 +383,8 @@ public:
 
 private:
     void RelocationHelper(
-        void*                    pBuffer,
-        uint64                   baseAddress,
+        void*                    pSrcBuffer,
+        void*                    pDstBuffer,
         Elf::Section<Allocator>* pRelocationSection) const;
 
     Result TranslateLegacyMetadata(MsgPackReader* pReader, PalCodeObjectMetadata* pOut) const;

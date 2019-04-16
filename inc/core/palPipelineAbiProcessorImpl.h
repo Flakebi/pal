@@ -648,8 +648,8 @@ void PipelineAbiProcessor<Allocator>::GetMetadataVersion(
 // =====================================================================================================================
 template <typename Allocator>
 void PipelineAbiProcessor<Allocator>::RelocationHelper(
-    void*                    pBuffer,
-    uint64                   baseAddress,
+    void*                    pSrcBuffer,
+    void*                    pDstBuffer,
     Elf::Section<Allocator>* pRelocationSection
     ) const
 {
@@ -664,7 +664,7 @@ void PipelineAbiProcessor<Allocator>::RelocationHelper(
         uint64 addend      = 0;
         relocationProcessor.Get(index, &offset, &symbolIndex, &type, &addend);
 
-        uint64*const pReference = static_cast<uint64* const>(VoidPtrInc(pBuffer, static_cast<size_t>(offset)));
+        uint64*const pReference = static_cast<uint64* const>(VoidPtrInc(pSrcBuffer, static_cast<size_t>(offset)));
 
         if (pRelocationSection->GetType() == Elf::SectionHeaderType::Rel)
         {
@@ -676,13 +676,15 @@ void PipelineAbiProcessor<Allocator>::RelocationHelper(
 
 // =====================================================================================================================
 template <typename Allocator>
-void PipelineAbiProcessor<Allocator>::ApplyRelocations(
-    void*          pBuffer,
+Result PipelineAbiProcessor<Allocator>::ApplyRelocations(
+    void*          pSrcBuffer,
+    void*          pDstBuffer,
     size_t         bufferSize,
-    AbiSectionType sectionType,
-    uint64         baseAddress
+    AbiSectionType sectionType
     ) const
 {
+    Result result = Result::Success;
+
     Elf::Section<Allocator>* pRelSection  = nullptr;
     Elf::Section<Allocator>* pRelaSection = nullptr;
 
@@ -709,13 +711,15 @@ void PipelineAbiProcessor<Allocator>::ApplyRelocations(
 
     if (pRelSection != nullptr)
     {
-        RelocationHelper(pBuffer, baseAddress, pRelSection);
+        RelocationHelper(pSrcBuffer, pDstBuffer, pRelSection);
     }
 
     if (pRelaSection != nullptr)
     {
-        RelocationHelper(pBuffer, baseAddress, pRelaSection);
+        RelocationHelper(pSrcBuffer, pDstBuffer, pRelaSection);
     }
+
+    return result;
 }
 
 // =====================================================================================================================
@@ -1130,6 +1134,7 @@ Result PipelineAbiProcessor<Allocator>::LoadFromBuffer(
             }
             else if (sectionIndex != 0)
             {
+                printf("Symbol %s (%u) refers to invalid section %u\n", pName, i, sectionIndex);
                 PAL_ASSERT_ALWAYS();
             }
 
