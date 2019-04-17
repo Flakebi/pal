@@ -210,11 +210,12 @@ public:
     virtual ~PipelineUploader();
 
     Result Begin(
-        Device*                   pDevice,
-        const AbiProcessor&       abiProcessor,
-        const CodeObjectMetadata& metadata,
-        PerfDataInfo*             pPerfDataInfoList,
-        bool                      preferNonLocalHeap);
+        Device*                        pDevice,
+        const AbiProcessor&            abiProcessor,
+        const CodeObjectMetadata&      metadata,
+        PerfDataInfo*                 pPerfDataInfoList,
+        bool                          preferNonLocalHeap,
+        Util::PipelineSectionSegmentMapping& mapping);
 
     void End();
 
@@ -222,6 +223,8 @@ public:
     uint32 CtxRegisterCount() const { return m_ctxRegisterCount; }
 
     bool EnableLoadIndexPath() const { return ((CtxRegisterCount() + ShRegisterCount()) != 0); }
+
+    void* MappedAddr() const { return m_pMappedPtr; }
 
     GpuMemory* GpuMem() const { return m_pGpuMemory; }
     gpusize GpuMemSize() const { return m_gpuMemSize; }

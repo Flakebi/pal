@@ -26,22 +26,14 @@
 
 #pragma once
 
-// TODO Needed headers
-#include "core/device.h"
-#include "core/gpuMemory.h"
-#include "palElfPackager.h"
-#include "palLib.h"
-#include "palMetroHash.h"
-#include "palSparseVectorImpl.h"
-#include "palPipeline.h"
 #include "palPipelineAbiProcessor.h"
-
 #include "palElfProcessor.h"
 #include "palInlineFuncs.h"
 
+// TODO Use pal vector
 #include <vector>
 
-namespace Pal
+namespace Util
 {
 
 // =====================================================================================================================
@@ -144,7 +136,8 @@ public:
     PipelineSectionSegmentMapping& GetSegment(size_t i) { return m_segments[i]; }
     Result GetSectionPosition(uint32 sectionIndex, uint64 sectionFlags, size_t *segmentIndex, gpusize *offset) const
     {
-        for (size_t i = 0; i < m_segments.size(); i++)
+        auto numSegments = m_segments.size();
+        for (size_t i = 0; i < numSegments; i++)
         {
             if (m_segments[i].GetFlags() == sectionFlags)
             {

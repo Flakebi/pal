@@ -30,7 +30,6 @@
 #include "core/hw/gfxip/pipeline.h"
 #include "palFile.h"
 #include "palPipelineAbiProcessorImpl.h"
-#include "pipelineGpuMapping.h"
 
 #include "core/devDriverUtil.h"
 
@@ -165,13 +164,23 @@ Result Pipeline::PerformRelocationsAndUploadToGpuMemory(
 {
     PAL_ASSERT(pUploader != nullptr);
 
-    Result result = pUploader->Begin(m_pDevice, abiProcessor, metadata, &m_perfDataInfo[0], preferNonLocalHeap);
+    Util::PipelineSectionSegmentMapping mapping(0);
+    Result result = pUploader->Begin(m_pDevice, abiProcessor, metadata, &m_perfDataInfo[0], preferNonLocalHeap, mapping);
     if (result == Result::Success)
     {
         m_gpuMemSize = pUploader->GpuMemSize();
         m_gpuMem.Update(pUploader->GpuMem(), pUploader->GpuMemOffset());
         m_dataOffset = pUploader->DataOffset();
         m_dataLength = pUploader->DataLength();
+
+        // Perform relocations
+        gpusize gpuVirtAddr = (pUploader->GpuMem()->Desc().gpuVirtAddr + pUploader->GpuMemOffset());
+        result = abiProcessor.ApplyRelocations(
+            pUploader->MappedAddr(),
+            gpuVirtAddr,
+            mapping
+        );
+
         if (!IsInternal())
         {
             printf("Uploaded pipeline\n");
@@ -543,11 +552,12 @@ PipelineUploader::~PipelineUploader()
 // and data.  The GPU virtual addresses for the code, data, and register segments are also computed.  The caller is
 // responsible for calling End() which unmaps the GPU memory.
 Result PipelineUploader::Begin(
-    Device*                   pDevice,
-    const AbiProcessor&       abiProcessor,
-    const CodeObjectMetadata& metadata,
-    PerfDataInfo*             pPerfDataInfoList,
-    bool                      preferNonLocalHeap)
+    Device*                        pDevice,
+    const AbiProcessor&            abiProcessor,
+    const CodeObjectMetadata&      metadata,
+    PerfDataInfo*                  pPerfDataInfoList,
+    bool                           preferNonLocalHeap,
+    Util::PipelineSectionSegmentMapping& mapping)
 {
     PAL_ASSERT(pPerfDataInfoList != nullptr);
 
@@ -580,7 +590,6 @@ Result PipelineUploader::Begin(
     abiProcessor.GetData(&pDataBuffer, &dataLength, &dataAlignment);
 
     // For now, have one segment containing all sections
-    PipelineSectionSegmentMapping mapping(0);
     auto *elfProcessor = abiProcessor.GetElfProcessor();
     auto sections = elfProcessor->GetSections();
     for (uint32 i = 0; i < sections->NumSections(); i++)

@@ -38,6 +38,7 @@
 #include "palMsgPackImpl.h"
 #include "palInlineFuncs.h"
 #include "palHashLiteralString.h"
+#include "palPipelineGpuMapping.h"
 #include "g_palPipelineAbiMetadataImpl.h"
 
 namespace Util
@@ -647,13 +648,34 @@ void PipelineAbiProcessor<Allocator>::GetMetadataVersion(
 
 // =====================================================================================================================
 template <typename Allocator>
-void PipelineAbiProcessor<Allocator>::RelocationHelper(
-    void*                    pSrcBuffer,
-    void*                    pDstBuffer,
-    Elf::Section<Allocator>* pRelocationSection
+Result PipelineAbiProcessor<Allocator>::RelocationHelper(
+    void*                                pDstBuffer,
+    gpusize                              gpuVirtAddr,
+    const Elf::Section<Allocator>*       pRelocationSection,
+    const PipelineSectionSegmentMapping& mapping
     ) const
 {
     Elf::RelocationProcessor<Allocator> relocationProcessor(pRelocationSection);
+
+    // sh_link contains a reference to the symbol section
+    auto symbolSection = pRelocationSection->GetLink();
+    // sh_info contains a reference to the target section where the
+    // relocations should be performed.
+    auto dstSection = pRelocationSection->GetInfo();
+
+    // Get symbols
+    Elf::StringProcessor<Allocator> symbolStringProcessor(m_pSymbolStrTabSection, m_pAllocator);
+    Elf::SymbolProcessor<Allocator> symbolProcessor(m_pSymbolSection, &symbolStringProcessor, m_pAllocator);
+
+    // Compute addresses
+    gpusize offset;
+    Result result = mapping.GetSectionOffset(dstSection->GetIndex(), &offset);
+    if (result != Result::Success)
+        return result;
+
+    gpusize dstGpuVirtAddr = gpuVirtAddr + offset;
+    const void* srcAddr = dstSection->GetData();
+    void* dstAddr = VoidPtrInc(pDstBuffer, static_cast<size_t>(offset));
 
     const uint32 numRelocations = relocationProcessor.GetNumRelocations();
     for (uint32 index = 0; index < numRelocations; index++)
@@ -663,63 +685,106 @@ void PipelineAbiProcessor<Allocator>::RelocationHelper(
         uint32 type        = 0;
         uint64 addend      = 0;
         relocationProcessor.Get(index, &offset, &symbolIndex, &type, &addend);
+        RelocationType relType = static_cast<RelocationType>(type);
 
-        uint64*const pReference = static_cast<uint64* const>(VoidPtrInc(pSrcBuffer, static_cast<size_t>(offset)));
+        // Get address of referenced symbol
+        const char* symbolName;
+        Elf::SymbolTableEntryBinding symbolBinding;
+        Elf::SymbolTableEntryType symbolType;
+        uint16 symbolSectionIndex;
+        uint64 symbolValue;
+        uint64 symbolSize;
 
-        if (pRelocationSection->GetType() == Elf::SectionHeaderType::Rel)
-        {
-            addend = *pReference;
-        }
+        symbolProcessor.Get(symbolIndex, &symbolName, &symbolBinding, &symbolType, &symbolSectionIndex, &symbolValue, &symbolSize);
 
+        // Compute virtual GPU address of the symbol
+        gpusize symbol = symbolValue;
+        gpusize sectionOffset;
+        result = mapping.GetSectionOffset(symbolSectionIndex, &sectionOffset);
+        if (result != Result::Success)
+            return result;
+        symbol += sectionOffset;
+
+        const uint64* pSrcAddr = static_cast<const uint64*>(VoidPtrInc(srcAddr, static_cast<size_t>(offset)));
+        uint64* pDstAddr = static_cast<uint64*>(VoidPtrInc(dstAddr, static_cast<size_t>(offset)));
+        gpusize pGpuVirtAddr = dstGpuVirtAddr + offset;
+
+		switch (relType) {
+		case RelocationType::Abs32:
+		case RelocationType::Abs32Lo:
+		case RelocationType::Abs32Hi:
+		case RelocationType::Rel32:
+		case RelocationType::Rel32Lo:
+		case RelocationType::Rel32Hi:
+			addend += *(const uint32*)pSrcAddr;
+			break;
+		case RelocationType::Abs64:
+		case RelocationType::Rel64:
+			addend += *(const uint64*)pSrcAddr;
+			break;
+		default:
+			PAL_ASSERT_ALWAYS();
+		}
+
+		uint64 abs = symbol + addend;
+
+        // TODO Convert endianess before writing into pDstAddr if the host order
+        // is big endian.
+		switch (relType) {
+		case RelocationType::Abs32:
+			PAL_ASSERT((uint32)abs == abs);
+		case RelocationType::Abs32Lo:
+			*(uint32*)pDstAddr = abs;
+			break;
+		case RelocationType::Abs32Hi:
+			*(uint32*)pDstAddr = abs >> 32;
+			break;
+		case RelocationType::Abs64:
+			*(uint64*)pDstAddr = abs;
+			break;
+		case RelocationType::Rel32:
+			PAL_ASSERT((int64_t)(int32_t)(abs - pGpuVirtAddr) == (int64_t)(abs - pGpuVirtAddr));
+		case RelocationType::Rel32Lo:
+			*(uint32*)pDstAddr = abs - pGpuVirtAddr;
+			break;
+		case RelocationType::Rel32Hi:
+			*(uint32*)pDstAddr = (abs - pGpuVirtAddr) >> 32;
+			break;
+		case RelocationType::Rel64:
+			*(uint64*)pDstAddr = abs - pGpuVirtAddr;
+			break;
+		default:
+			PAL_ASSERT_ALWAYS();
+		}
     }
+
+    return Result::Success;
 }
 
 // =====================================================================================================================
 template <typename Allocator>
 Result PipelineAbiProcessor<Allocator>::ApplyRelocations(
-    void*          pSrcBuffer,
-    void*          pDstBuffer,
-    size_t         bufferSize,
-    AbiSectionType sectionType
+    void*   pDstBuffer,
+    gpusize gpuVirtAddr,
+    const PipelineSectionSegmentMapping& mapping
     ) const
 {
-    Result result = Result::Success;
-
-    Elf::Section<Allocator>* pRelSection  = nullptr;
-    Elf::Section<Allocator>* pRelaSection = nullptr;
-
-    switch (sectionType)
+    // Iterate through all REL sections
+    auto sections = m_elfProcessor.GetSections();
+    auto numSection = sections->NumSections();
+    for (size_t i = 0; i < numSection; i++)
     {
-    case AbiSectionType::Undefined:
-        PAL_ASSERT_ALWAYS();
-        break;
-    case AbiSectionType::Code:
-        pRelSection  = m_pRelTextSection;
-        pRelaSection = m_pRelaTextSection;
-        break;
-    case AbiSectionType::Data:
-        pRelSection  = m_pRelDataSection;
-        pRelaSection = m_pRelaDataSection;
-        break;
-    case AbiSectionType::Disassembly:
-        PAL_ASSERT_ALWAYS();
-        break;
-    default:
-        PAL_NEVER_CALLED();
-        break;
+        auto section = sections->Get(i);
+        auto type = section->GetType();
+        if (type != Elf::SectionHeaderType::Rel && type != Elf::SectionHeaderType::Rela)
+            continue;
+
+        auto result = RelocationHelper(pDstBuffer, gpuVirtAddr, section, mapping);
+        if (result != Result::Success)
+            return result;
     }
 
-    if (pRelSection != nullptr)
-    {
-        RelocationHelper(pSrcBuffer, pDstBuffer, pRelSection);
-    }
-
-    if (pRelaSection != nullptr)
-    {
-        RelocationHelper(pSrcBuffer, pDstBuffer, pRelaSection);
-    }
-
-    return result;
+    return Result::Success;
 }
 
 // =====================================================================================================================

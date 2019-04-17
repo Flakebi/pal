@@ -38,6 +38,8 @@
 
 namespace Util
 {
+class PipelineSectionSegmentMapping;
+
 namespace Abi
 {
 
@@ -329,10 +331,9 @@ public:
     /// @param [in] bufferSize     Size of the buffer in bytes to apply relocations to.
     /// @param [in] AbiSectionType The ABI section type to apply relocations to.
     Result ApplyRelocations(
-        void*          pSrcBuffer,
-        void*          pDstBuffer,
-        size_t         bufferSize,
-        AbiSectionType sectionType) const;
+        void*   pDstBuffer,
+        gpusize gpuVirtAddr,
+        const PipelineSectionSegmentMapping& mapping) const;
 
     /// Finalizes the ABI filling out all the elf structures. Call this and
     /// make custom changes with the returned ElfProcessor before calling
@@ -382,10 +383,11 @@ public:
     Result LoadFromBuffer(const void* pBuffer, size_t bufferSize);
 
 private:
-    void RelocationHelper(
-        void*                    pSrcBuffer,
-        void*                    pDstBuffer,
-        Elf::Section<Allocator>* pRelocationSection) const;
+    Result RelocationHelper(
+        void*                                pDstBuffer,
+        gpusize                              gpuVirtAddr,
+        const Elf::Section<Allocator>*       pRelocationSection,
+        const PipelineSectionSegmentMapping& mapping) const;
 
     Result TranslateLegacyMetadata(MsgPackReader* pReader, PalCodeObjectMetadata* pOut) const;
 
