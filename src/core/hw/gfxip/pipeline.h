@@ -139,6 +139,7 @@ protected:
 
     bool IsInternal() const { return m_flags.isInternal != 0; }
     void PrintData();
+    void PrintText(void* pMappedPtr, size_t offset, size_t length);
 
     Result PerformRelocationsAndUploadToGpuMemory(
         const AbiProcessor&       abiProcessor,
@@ -240,6 +241,8 @@ public:
 
     size_t DataOffset() const { return m_dataOffset; }
     size_t DataLength() const { return m_dataLength; }
+    size_t TextOffset() const { return m_textOffset; }
+    size_t TextLength() const { return m_textLength; }
 
 protected:
     // Writes a context register offset and value to the mapped region where registers are stored in GPU memory.
@@ -276,6 +279,8 @@ private:
 
     size_t   m_dataOffset;
     size_t   m_dataLength;
+    size_t   m_textOffset;
+    size_t   m_textLength;
     void*    m_pMappedPtr;
     uint32*  m_pCtxRegWritePtr;
     uint32*  m_pShRegWritePtr;

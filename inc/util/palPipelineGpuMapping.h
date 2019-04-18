@@ -94,6 +94,14 @@ public:
         return Result::ErrorUnavailable;
     }
 
+    void DebugPrint() const
+    {
+        puts("---- Begin Section mapping");
+        for (const auto& section : m_sections)
+            printf("0x%0llx: %u\n", section.offset, section.id);
+        puts("---- End Section mapping\n");
+    }
+
 private:
     uint64 m_flags;
     uint64 m_alignment;

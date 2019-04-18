@@ -655,6 +655,7 @@ Result PipelineAbiProcessor<Allocator>::RelocationHelper(
     const PipelineSectionSegmentMapping& mapping
     ) const
 {
+    bool isRela = pRelocationSection->GetType() == Elf::SectionHeaderType::Rela;
     Elf::RelocationProcessor<Allocator> relocationProcessor(pRelocationSection);
 
     // sh_link contains a reference to the symbol section
@@ -680,11 +681,11 @@ Result PipelineAbiProcessor<Allocator>::RelocationHelper(
     const uint32 numRelocations = relocationProcessor.GetNumRelocations();
     for (uint32 index = 0; index < numRelocations; index++)
     {
-        uint64 offset      = 0;
+        uint64 relocOffset = 0;
         uint32 symbolIndex = 0;
         uint32 type        = 0;
         uint64 addend      = 0;
-        relocationProcessor.Get(index, &offset, &symbolIndex, &type, &addend);
+        relocationProcessor.Get(index, &relocOffset, &symbolIndex, &type, &addend);
         RelocationType relType = static_cast<RelocationType>(type);
 
         // Get address of referenced symbol
@@ -697,65 +698,69 @@ Result PipelineAbiProcessor<Allocator>::RelocationHelper(
 
         symbolProcessor.Get(symbolIndex, &symbolName, &symbolBinding, &symbolType, &symbolSectionIndex, &symbolValue, &symbolSize);
 
-        // Compute virtual GPU address of the symbol
-        gpusize symbol = symbolValue;
-        gpusize sectionOffset;
-        result = mapping.GetSectionOffset(symbolSectionIndex, &sectionOffset);
+        result = mapping.GetSectionOffset(symbolSectionIndex, &offset);
         if (result != Result::Success)
             return result;
-        symbol += sectionOffset;
+        // The virtual GPU address of the symbol
+        gpusize symbol = gpuVirtAddr + offset + symbolValue;
 
-        const uint64* pSrcAddr = static_cast<const uint64*>(VoidPtrInc(srcAddr, static_cast<size_t>(offset)));
-        uint64* pDstAddr = static_cast<uint64*>(VoidPtrInc(dstAddr, static_cast<size_t>(offset)));
-        gpusize pGpuVirtAddr = dstGpuVirtAddr + offset;
+        // Address where to write the relocation
+        const uint64* pSrcAddr = static_cast<const uint64*>(VoidPtrInc(srcAddr, static_cast<size_t>(relocOffset)));
+        uint64* pDstAddr = static_cast<uint64*>(VoidPtrInc(dstAddr, static_cast<size_t>(relocOffset)));
+        gpusize pGpuVirtAddr = dstGpuVirtAddr + relocOffset;
 
-		switch (relType) {
-		case RelocationType::Abs32:
-		case RelocationType::Abs32Lo:
-		case RelocationType::Abs32Hi:
-		case RelocationType::Rel32:
-		case RelocationType::Rel32Lo:
-		case RelocationType::Rel32Hi:
-			addend += *(const uint32*)pSrcAddr;
-			break;
-		case RelocationType::Abs64:
-		case RelocationType::Rel64:
-			addend += *(const uint64*)pSrcAddr;
-			break;
-		default:
-			PAL_ASSERT_ALWAYS();
-		}
+        if (!isRela)
+        {
+            // Add original value for .rel sections.
+            // .rela sections explicitely contain the addend.
+            switch (relType) {
+            case RelocationType::Abs32:
+            case RelocationType::Abs32Lo:
+            case RelocationType::Abs32Hi:
+            case RelocationType::Rel32:
+            case RelocationType::Rel32Lo:
+            case RelocationType::Rel32Hi:
+                addend += *(const uint32*)pSrcAddr;
+                break;
+            case RelocationType::Abs64:
+            case RelocationType::Rel64:
+                addend += *(const uint64*)pSrcAddr;
+                break;
+            default:
+                PAL_ASSERT_ALWAYS();
+            }
+        }
 
-		uint64 abs = symbol + addend;
+        uint64 abs = symbol + addend;
 
         // TODO Convert endianess before writing into pDstAddr if the host order
         // is big endian.
-		switch (relType) {
-		case RelocationType::Abs32:
-			PAL_ASSERT((uint32)abs == abs);
-		case RelocationType::Abs32Lo:
-			*(uint32*)pDstAddr = abs;
-			break;
-		case RelocationType::Abs32Hi:
-			*(uint32*)pDstAddr = abs >> 32;
-			break;
-		case RelocationType::Abs64:
-			*(uint64*)pDstAddr = abs;
-			break;
-		case RelocationType::Rel32:
-			PAL_ASSERT((int64_t)(int32_t)(abs - pGpuVirtAddr) == (int64_t)(abs - pGpuVirtAddr));
-		case RelocationType::Rel32Lo:
-			*(uint32*)pDstAddr = abs - pGpuVirtAddr;
-			break;
-		case RelocationType::Rel32Hi:
-			*(uint32*)pDstAddr = (abs - pGpuVirtAddr) >> 32;
-			break;
-		case RelocationType::Rel64:
-			*(uint64*)pDstAddr = abs - pGpuVirtAddr;
-			break;
-		default:
-			PAL_ASSERT_ALWAYS();
-		}
+        switch (relType) {
+        case RelocationType::Abs32:
+            PAL_ASSERT((uint32)abs == abs);
+        case RelocationType::Abs32Lo:
+            *(uint32*)pDstAddr = abs;
+            break;
+        case RelocationType::Abs32Hi:
+            *(uint32*)pDstAddr = abs >> 32;
+            break;
+        case RelocationType::Abs64:
+            *(uint64*)pDstAddr = abs;
+            break;
+        case RelocationType::Rel32:
+            PAL_ASSERT((int64_t)(int32_t)(abs - pGpuVirtAddr) == (int64_t)(abs - pGpuVirtAddr));
+        case RelocationType::Rel32Lo:
+            *(uint32*)pDstAddr = abs - pGpuVirtAddr;
+            break;
+        case RelocationType::Rel32Hi:
+            *(uint32*)pDstAddr = (abs - pGpuVirtAddr) >> 32;
+            break;
+        case RelocationType::Rel64:
+            *(uint64*)pDstAddr = abs - pGpuVirtAddr;
+            break;
+        default:
+            PAL_ASSERT_ALWAYS();
+        }
     }
 
     return Result::Success;

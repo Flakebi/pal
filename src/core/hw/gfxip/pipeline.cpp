@@ -111,35 +111,43 @@ Pipeline::~Pipeline()
 }
 
 // =====================================================================================================================
+static void PrintHex(const char* ptr, size_t len)
+{
+    for (size_t i = 0; i < len; i++)
+        printf("0x%hhx, ", ptr[i]);
+    puts("");
+}
+
+// =====================================================================================================================
 void Pipeline::PrintData()
 {
-    if (m_gpuMem.IsBound())
+    if (m_dataLength > 0)
     {
-        if (m_dataLength > 0)
+        void *pMappedPtr;
+        Result result = m_gpuMem.Map(&pMappedPtr);
+        if (result == Result::Success)
         {
-            void *pMappedPtr;
-            Result result = m_gpuMem.Map(&pMappedPtr);
-            if (result == Result::Success)
-            {
-                pMappedPtr = VoidPtrInc(pMappedPtr, m_dataOffset);
-                char *local_data = (char*)malloc(m_dataLength);
-                memcpy(local_data, pMappedPtr, m_dataLength);
-                m_gpuMem.Unmap();
-
-                for (size_t i = 0; i < m_dataLength; i++)
-                {
-                    printf("0x%hhx, ", local_data[i]);
-                }
-                puts("\n");
-
-                free(local_data);
-            }
-            else
-            {
-                printf("Failed to map memory\n");
-            }
+            pMappedPtr = VoidPtrInc(pMappedPtr, m_dataOffset);
+            printf("Data: ");
+            PrintHex(static_cast<char*>(pMappedPtr), m_dataLength);
+            m_gpuMem.Unmap();
+        }
+        else
+        {
+            printf("Failed to map memory\n");
         }
     }
+}
+
+// =====================================================================================================================
+void Pipeline::PrintText(void* pMappedPtr, size_t offset, size_t length)
+{
+    pMappedPtr = VoidPtrInc(pMappedPtr, offset);
+    unsigned int* ptr = static_cast<unsigned int*>(pMappedPtr);
+    printf("Text: ");
+    for (size_t i = 0; i < length / sizeof(*ptr); i++)
+        printf("0x%0x, ", ptr[i]);
+    puts("");
 }
 
 // =====================================================================================================================
@@ -183,8 +191,13 @@ Result Pipeline::PerformRelocationsAndUploadToGpuMemory(
 
         if (!IsInternal())
         {
+            printf("GPU offset address: 0x%llx\n", gpuVirtAddr);
+            mapping.DebugPrint();
             printf("Uploaded pipeline\n");
-            PrintData();
+            void* pMappedPtr = VoidPtrInc(pUploader->MappedAddr(), pUploader->DataOffset());
+            printf("Data: ");
+            PrintHex(static_cast<char*>(pMappedPtr), pUploader->DataLength());
+            PrintText(pUploader->MappedAddr(), pUploader->TextOffset(), pUploader->TextLength());
         }
     }
 
@@ -531,6 +544,8 @@ PipelineUploader::PipelineUploader(
     m_ctxRegisterCount(ctxRegisterCount),
     m_dataOffset(0),
     m_dataLength(0),
+    m_textOffset(0),
+    m_textLength(0),
     m_pMappedPtr(nullptr),
     m_pCtxRegWritePtr(nullptr),
     m_pShRegWritePtr(nullptr)
@@ -590,7 +605,7 @@ Result PipelineUploader::Begin(
     abiProcessor.GetData(&pDataBuffer, &dataLength, &dataAlignment);
 
     // For now, have one segment containing all sections
-    auto *elfProcessor = abiProcessor.GetElfProcessor();
+    auto elfProcessor = abiProcessor.GetElfProcessor();
     auto sections = elfProcessor->GetSections();
     for (uint32 i = 0; i < sections->NumSections(); i++)
     {
@@ -642,6 +657,7 @@ Result PipelineUploader::Begin(
         result = m_pGpuMemory->Map(&m_pMappedPtr);
         if (result == Result::Success)
         {
+            gpusize offset;
             m_gpuMemSize = createInfo.size;
             m_pMappedPtr = VoidPtrInc(m_pMappedPtr, static_cast<size_t>(m_baseOffset));
 
@@ -650,7 +666,6 @@ Result PipelineUploader::Begin(
             {
                 uint32 sectionIndex = mapping.GetSectionIndex(i);
                 auto section = sections->Get(sectionIndex);
-                gpusize offset;
                 result = mapping.GetSectionOffset(sectionIndex, &offset);
                 if (result != Result::Success)
                     return result;
@@ -662,18 +677,31 @@ Result PipelineUploader::Begin(
             gpusize gpuVirtAddr = (m_pGpuMemory->Desc().gpuVirtAddr + m_baseOffset);
             void* pMappedPtr = m_pMappedPtr;
 
+            // Find PGO performance counters
+            uint32 perfSectionIndex = sections->GetSectionIndex("__llvm_prf_cnts");
+            if (perfSectionIndex)
+            {
+                result = mapping.GetSectionOffset(perfSectionIndex, &offset);
+                if (result != Result::Success)
+                    return result;
+
+                auto perfSection = sections->Get(perfSectionIndex);
+                m_dataLength = perfSection->GetDataSize();
+                m_dataOffset = offset;
+            }
+
             // Find offset of .text section
             auto textSection = abiProcessor.GetTextSection();
             uint32 sectionIndex = textSection->GetIndex();
-            gpusize offset;
             result = mapping.GetSectionOffset(sectionIndex, &offset);
             if (result != Result::Success)
                 return result;
             m_codeGpuVirtAddr     = gpuVirtAddr + offset;
             m_prefetchGpuVirtAddr = m_codeGpuVirtAddr;
             m_prefetchSize        = textSection->GetDataSize();
+            m_textOffset          = offset;
+            m_textLength          = m_prefetchSize;
 
-            m_dataLength = dataLength;
             if (dataLength > 0)
             {
                 // Find offset of .data section
@@ -683,7 +711,6 @@ Result PipelineUploader::Begin(
                 if (result != Result::Success)
                     return result;
                 m_dataGpuVirtAddr = gpuVirtAddr + offset;
-                m_dataOffset = offset;
 
                 pMappedPtr  = VoidPtrInc(m_pMappedPtr, static_cast<size_t>(offset));
 
