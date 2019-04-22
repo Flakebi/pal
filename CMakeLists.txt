@@ -74,6 +74,8 @@ cmake_dependent_option(PAL_BUILD_OSS4   "Build PAL with OSS4?"   ON "PAL_BUILD_O
 
 option(PAL_BUILD_WAYLAND "Build PAL with WAYLAND support?" OFF)
 
+option(PAL_BUILD_PGO_RT  "Build PAL with shader PGO support?" OFF)
+
 # PAL Client Options ###############################################################################
 # Use Vulkan as the default client.
 set(PAL_CLIENT "VULKAN" CACHE STRING "Client interfacing with PAL.")
