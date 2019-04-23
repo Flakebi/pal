@@ -32,6 +32,7 @@
 
 // TODO Use pal vector
 #include <vector>
+#include <cstdio>
 
 namespace Util
 {

@@ -30,10 +30,16 @@
 #include "core/hw/gfxip/pipeline.h"
 #include "palFile.h"
 #include "palPipelineAbiProcessorImpl.h"
+extern "C" {
+    #include "llvmInstrProfiling.h"
+}
 
 #include "core/devDriverUtil.h"
 
 using namespace Util;
+
+// Don't use auto initialization of PGO code
+int __llvm_profile_runtime = 0;
 
 namespace Pal
 {
@@ -135,6 +141,15 @@ void Pipeline::PrintData()
         else
         {
             printf("Failed to map memory\n");
+        }
+
+        // Write profile data
+        // TODO
+        __llvm_profile_set_filename("/home/sebi/Downloads/test-%m.prof");
+        int r = __llvm_profile_dump();
+        if (r)
+        {
+            printf("Failed to dump profiling data (%d)\n", r);
         }
     }
 }
