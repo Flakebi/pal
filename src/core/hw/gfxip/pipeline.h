@@ -176,8 +176,15 @@ protected:
 
     BoundGpuMemory  m_gpuMem;
     gpusize         m_gpuMemSize;
-    size_t          m_dataOffset;
-    size_t          m_dataLength;
+
+    // PGO section offsets
+    size_t m_DataFirst;
+    size_t m_DataLast;
+    size_t m_NamesFirst;
+    size_t m_NamesLast;
+    size_t m_CountersFirst;
+    size_t m_CountersLast;
+    size_t m_OrderFileFirst;
 
     void*   m_pPipelineBinary;      // Buffer containing the pipeline binary data (Pipeline ELF ABI).
     size_t  m_pipelineBinaryLen;    // Size of the pipeline binary data, in bytes.
@@ -239,8 +246,6 @@ public:
     gpusize PrefetchAddr() const { return m_prefetchGpuVirtAddr; }
     gpusize PrefetchSize() const { return m_prefetchSize; }
 
-    size_t DataOffset() const { return m_dataOffset; }
-    size_t DataLength() const { return m_dataLength; }
     size_t TextOffset() const { return m_textOffset; }
     size_t TextLength() const { return m_textLength; }
 
@@ -277,8 +282,6 @@ private:
     const uint32  m_shRegisterCount;
     const uint32  m_ctxRegisterCount;
 
-    size_t   m_dataOffset;
-    size_t   m_dataLength;
     size_t   m_textOffset;
     size_t   m_textLength;
     void*    m_pMappedPtr;

@@ -30,11 +30,13 @@
 #include "core/hw/gfxip/pipeline.h"
 #include "palFile.h"
 #include "palPipelineAbiProcessorImpl.h"
+
+#include "core/devDriverUtil.h"
+
 extern "C" {
     #include "llvmInstrProfiling.h"
 }
-
-#include "core/devDriverUtil.h"
+#include "llvmProfExportsImpl.h"
 
 using namespace Util;
 
@@ -83,8 +85,13 @@ Pipeline::Pipeline(
     m_pDevice(pDevice),
     m_gpuMem(),
     m_gpuMemSize(0),
-    m_dataLength(0),
-    m_dataOffset(0),
+    m_DataFirst(0),
+    m_DataLast(0),
+    m_NamesFirst(0),
+    m_NamesLast(0),
+    m_CountersFirst(0),
+    m_CountersLast(0),
+    m_OrderFileFirst(0),
     m_pPipelineBinary(nullptr),
     m_pipelineBinaryLen(0),
     m_apiHwMapping()
@@ -120,22 +127,61 @@ Pipeline::~Pipeline()
 static void PrintHex(const char* ptr, size_t len)
 {
     for (size_t i = 0; i < len; i++)
-        printf("0x%hhx, ", ptr[i]);
+        printf("0x%02hhx, ", ptr[i]);
     puts("");
 }
 
 // =====================================================================================================================
+static void PrintHexll(const void* voidptr, size_t length)
+{
+    const unsigned int* ptr = static_cast<const unsigned int*>(voidptr);
+    for (size_t i = 0; i < length / sizeof(*ptr); i++)
+        printf("0x%016llx, ", ptr[i]);
+    puts("");
+}
+
+// =====================================================================================================================
+// TODO Rename to Save PGO data
 void Pipeline::PrintData()
 {
-    if (m_dataLength > 0)
+    if (m_DataFirst)
     {
         void *pMappedPtr;
         Result result = m_gpuMem.Map(&pMappedPtr);
         if (result == Result::Success)
         {
-            pMappedPtr = VoidPtrInc(pMappedPtr, m_dataOffset);
-            printf("Data: ");
-            PrintHex(static_cast<char*>(pMappedPtr), m_dataLength);
+            printf("Profile data: ");
+            PrintHexll(VoidPtrInc(pMappedPtr, m_DataFirst), m_DataLast - m_DataFirst);
+            printf("Profile counter: ");
+            PrintHexll(VoidPtrInc(pMappedPtr, m_CountersFirst), m_CountersLast - m_CountersFirst);
+            printf("Profile names: ");
+            PrintHexll(VoidPtrInc(pMappedPtr, m_NamesFirst), m_NamesLast - m_NamesFirst);
+
+            // We access global variables, only one pipeline should be able to do
+            // this at once.
+            MutexAuto lock(&LlvmProfileMutex);
+
+            // Fill pointers with mapped addresses of the sections
+            DataFirst = static_cast<const __llvm_profile_data*>(VoidPtrInc(pMappedPtr, m_DataFirst));
+            DataLast = static_cast<const __llvm_profile_data*>(VoidPtrInc(pMappedPtr, m_DataLast));
+            NamesFirst = static_cast<const char*>(VoidPtrInc(pMappedPtr, m_NamesFirst));
+            NamesLast = static_cast<const char*>(VoidPtrInc(pMappedPtr, m_NamesLast));
+            CountersFirst = static_cast<uint64*>(VoidPtrInc(pMappedPtr, m_CountersFirst));
+            CountersLast = static_cast<uint64*>(VoidPtrInc(pMappedPtr, m_CountersLast));
+            OrderFileFirst = static_cast<uint32*>(VoidPtrInc(pMappedPtr, m_OrderFileFirst));
+
+            // Write profile data
+            // TODO Set filename based on pipeline hash
+            // TODO Pipeline dump debug dir + /pgo-profiles/pipeline-<hash>.profraw
+            // Remove file if it exists before
+            // Create directory
+            __llvm_profile_set_filename("/home/sebi/Downloads/pipeline-%m.profraw");
+            int r = __llvm_profile_dump();
+            if (r)
+            {
+                printf("Failed to dump profiling data (%d)\n", r);
+            }
+
             m_gpuMem.Unmap();
         }
         else
@@ -143,14 +189,6 @@ void Pipeline::PrintData()
             printf("Failed to map memory\n");
         }
 
-        // Write profile data
-        // TODO
-        __llvm_profile_set_filename("/home/sebi/Downloads/test-%m.prof");
-        int r = __llvm_profile_dump();
-        if (r)
-        {
-            printf("Failed to dump profiling data (%d)\n", r);
-        }
     }
 }
 
@@ -161,7 +199,7 @@ void Pipeline::PrintText(void* pMappedPtr, size_t offset, size_t length)
     unsigned int* ptr = static_cast<unsigned int*>(pMappedPtr);
     printf("Text: ");
     for (size_t i = 0; i < length / sizeof(*ptr); i++)
-        printf("0x%0x, ", ptr[i]);
+        printf("0x%08x, ", ptr[i]);
     puts("");
 }
 
@@ -193,8 +231,6 @@ Result Pipeline::PerformRelocationsAndUploadToGpuMemory(
     {
         m_gpuMemSize = pUploader->GpuMemSize();
         m_gpuMem.Update(pUploader->GpuMem(), pUploader->GpuMemOffset());
-        m_dataOffset = pUploader->DataOffset();
-        m_dataLength = pUploader->DataLength();
 
         // Perform relocations
         gpusize gpuVirtAddr = (pUploader->GpuMem()->Desc().gpuVirtAddr + pUploader->GpuMemOffset());
@@ -209,10 +245,42 @@ Result Pipeline::PerformRelocationsAndUploadToGpuMemory(
             printf("GPU offset address: 0x%llx\n", gpuVirtAddr);
             mapping.DebugPrint();
             printf("Uploaded pipeline\n");
-            void* pMappedPtr = VoidPtrInc(pUploader->MappedAddr(), pUploader->DataOffset());
-            printf("Data: ");
-            PrintHex(static_cast<char*>(pMappedPtr), pUploader->DataLength());
             PrintText(pUploader->MappedAddr(), pUploader->TextOffset(), pUploader->TextLength());
+
+            // Set PGO section offsets
+            auto elfProcessor = abiProcessor.GetElfProcessor();
+            auto sections = elfProcessor->GetSections();
+            gpusize offset;
+
+            auto section = sections->Get("__llvm_prf_data");
+            if (section)
+            {
+                result = mapping.GetSectionOffset(section->GetIndex(), &offset);
+                if (result != Result::Success)
+                    return result;
+                m_DataFirst = static_cast<size_t>(offset);
+                m_DataLast = static_cast<size_t>(offset) + static_cast<size_t>(section->GetDataSize());
+            }
+
+            section = sections->Get("__llvm_prf_names");
+            if (section)
+            {
+                result = mapping.GetSectionOffset(section->GetIndex(), &offset);
+                if (result != Result::Success)
+                    return result;
+                m_NamesFirst = static_cast<size_t>(offset);
+                m_NamesLast = static_cast<size_t>(offset) + static_cast<size_t>(section->GetDataSize());
+            }
+
+            section = sections->Get("__llvm_prf_cnts");
+            if (section)
+            {
+                result = mapping.GetSectionOffset(section->GetIndex(), &offset);
+                if (result != Result::Success)
+                    return result;
+                m_CountersFirst = static_cast<size_t>(offset);
+                m_CountersLast = static_cast<size_t>(offset) + static_cast<size_t>(section->GetDataSize());
+            }
         }
     }
 
@@ -557,8 +625,6 @@ PipelineUploader::PipelineUploader(
     m_shRegGpuVirtAddr(0),
     m_shRegisterCount(shRegisterCount),
     m_ctxRegisterCount(ctxRegisterCount),
-    m_dataOffset(0),
-    m_dataLength(0),
     m_textOffset(0),
     m_textLength(0),
     m_pMappedPtr(nullptr),
@@ -626,8 +692,16 @@ Result PipelineUploader::Begin(
     {
         auto section = sections->Get(i);
         uint32 flags = section->GetSectionHeader()->sh_flags;
-        if ((flags & Elf::ShfWrite) || (flags & Elf::ShfExecInstr))
-        mapping.AddSection(section);
+        if ((flags & Elf::ShfWrite)
+            || (flags & Elf::ShfExecInstr)
+            // We do not want to allocate every section that is alloc-only
+            // because it is probably too much (it contains .note and the my gui
+            // hangs or crashes…).
+            // So we only add sections here starting with __llvm_prf which
+            // contain PGO data.
+            || ((flags & Elf::ShfAlloc)
+                && (strncmp("__llvm_prf", section->GetName(), strlen("__llvm_prf")) == 0)))
+            mapping.AddSection(section);
     }
     createInfo.size = mapping.GetSize();
 
@@ -691,19 +765,6 @@ Result PipelineUploader::Begin(
 
             gpusize gpuVirtAddr = (m_pGpuMemory->Desc().gpuVirtAddr + m_baseOffset);
             void* pMappedPtr = m_pMappedPtr;
-
-            // Find PGO performance counters
-            uint32 perfSectionIndex = sections->GetSectionIndex("__llvm_prf_cnts");
-            if (perfSectionIndex)
-            {
-                result = mapping.GetSectionOffset(perfSectionIndex, &offset);
-                if (result != Result::Success)
-                    return result;
-
-                auto perfSection = sections->Get(perfSectionIndex);
-                m_dataLength = perfSection->GetDataSize();
-                m_dataOffset = offset;
-            }
 
             // Find offset of .text section
             auto textSection = abiProcessor.GetTextSection();
