@@ -138,7 +138,8 @@ protected:
     Pipeline(Device* pDevice, bool isInternal);
 
     bool IsInternal() const { return m_flags.isInternal != 0; }
-    void PrintData();
+    // Write profiling data to file for profile-guided optimizations.
+    void DumpPgoData();
     void PrintText(void* pMappedPtr, size_t offset, size_t length);
 
     Result PerformRelocationsAndUploadToGpuMemory(

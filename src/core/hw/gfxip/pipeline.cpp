@@ -32,6 +32,7 @@
 #include "palPipelineAbiProcessorImpl.h"
 
 #include "core/devDriverUtil.h"
+#include "util/palSysUtil.h"
 
 extern "C" {
     #include "llvmInstrProfiling.h"
@@ -113,8 +114,7 @@ Pipeline::~Pipeline()
     {
         if (!IsInternal())
         {
-            printf("Destroying pipeline\n");
-            PrintData();
+            DumpPgoData();
         }
         m_pDevice->MemMgr()->FreeGpuMem(m_gpuMem.Memory(), m_gpuMem.Offset());
         m_gpuMem.Update(nullptr, 0);
@@ -141,8 +141,7 @@ static void PrintHexll(const void* voidptr, size_t length)
 }
 
 // =====================================================================================================================
-// TODO Rename to Save PGO data
-void Pipeline::PrintData()
+void Pipeline::DumpPgoData()
 {
     if (m_DataFirst)
     {
@@ -150,12 +149,13 @@ void Pipeline::PrintData()
         Result result = m_gpuMem.Map(&pMappedPtr);
         if (result == Result::Success)
         {
-            printf("Profile data: ");
+            puts("Dumping PGO data");
+            /*printf("Profile data: ");
             PrintHexll(VoidPtrInc(pMappedPtr, m_DataFirst), m_DataLast - m_DataFirst);
             printf("Profile counter: ");
             PrintHexll(VoidPtrInc(pMappedPtr, m_CountersFirst), m_CountersLast - m_CountersFirst);
             printf("Profile names: ");
-            PrintHexll(VoidPtrInc(pMappedPtr, m_NamesFirst), m_NamesLast - m_NamesFirst);
+            PrintHexll(VoidPtrInc(pMappedPtr, m_NamesFirst), m_NamesLast - m_NamesFirst);*/
 
             // TODO We do not need to upload the names to the GPU, we can use
             // the local address here (in the pipeline elf).
@@ -189,15 +189,31 @@ void Pipeline::PrintData()
             OrderFileFirst = static_cast<uint32*>(VoidPtrInc(pMappedPtr, m_OrderFileFirst));
 
             // Write profile data
-            // TODO Set filename based on pipeline hash
-            // TODO Pipeline dump debug dir + /pgo-profiles/pipeline-<hash>.profraw
-            // Remove file if it exists before
+            // Set filename based on pipeline hash:
+            // Debug dir + /pgo/Pipeline_<hash>.profraw
+            const char* debugDir = m_pDevice->GetDebugFilePath();
+            char fileName[512] = { };
+            Snprintf(&fileName[0],
+                     sizeof(fileName),
+                     "%s/pgo",
+                     debugDir);
             // Create directory
-            __llvm_profile_set_filename("/home/sebi/Downloads/pipeline-%m.profraw");
-            int r = __llvm_profile_dump();
-            if (r)
+            MkDirRecursively(fileName);
+
+            Snprintf(&fileName[0],
+                     sizeof(fileName),
+                     "%s/pgo/Pipeline_0x%016llX.profraw",
+                     debugDir,
+                     m_info.internalPipelineHash.stable);
+
+            // Remove file if it exists, ignore errors if it failed
+            remove(fileName);
+
+            __llvm_profile_set_filename(fileName);
+            int result = __llvm_profile_dump();
+            if (result)
             {
-                printf("Failed to dump profiling data (%d)\n", r);
+                printf("Failed to dump profiling data (%d)\n", result);
             }
 
             m_gpuMem.Unmap();
