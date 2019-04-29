@@ -146,7 +146,7 @@ void Pipeline::PrintData()
 {
     if (m_DataFirst)
     {
-        void *pMappedPtr;
+        void* pMappedPtr;
         Result result = m_gpuMem.Map(&pMappedPtr);
         if (result == Result::Success)
         {
@@ -157,16 +157,34 @@ void Pipeline::PrintData()
             printf("Profile names: ");
             PrintHexll(VoidPtrInc(pMappedPtr, m_NamesFirst), m_NamesLast - m_NamesFirst);
 
+            // TODO We do not need to upload the names to the GPU, we can use
+            // the local address here (in the pipeline elf).
+
+            // We have to modify the pointers that are stored in the prf_data
+            // TODO Use PAL vector
+            const __llvm_profile_data* mappedProfData = static_cast<const __llvm_profile_data*>(VoidPtrInc(pMappedPtr, m_DataFirst));
+            const __llvm_profile_data* mappedProfDataEnd = static_cast<const __llvm_profile_data*>(VoidPtrInc(pMappedPtr, m_DataLast));
+            std::vector<__llvm_profile_data> prof_data(mappedProfData, mappedProfDataEnd);
+
+            uint64 pCountersPtr = reinterpret_cast<uint64>(VoidPtrInc(pMappedPtr, m_CountersFirst));
+            uint64 pGpuCountersPtr = reinterpret_cast<uint64>(m_gpuMem.GpuVirtAddr() + m_CountersFirst);
+            // Wrap-around on unsigned integers is defined behaviour, so this works.
+            ptrdiff_t ptrDiff = static_cast<ptrdiff_t>(pCountersPtr - pGpuCountersPtr);
+            for (auto& data : prof_data)
+            {
+                data.CounterPtr += ptrDiff;
+            }
+
             // We access global variables, only one pipeline should be able to do
-            // this at once.
+            // this simultaneously.
             MutexAuto lock(&LlvmProfileMutex);
 
             // Fill pointers with mapped addresses of the sections
-            DataFirst = static_cast<const __llvm_profile_data*>(VoidPtrInc(pMappedPtr, m_DataFirst));
-            DataLast = static_cast<const __llvm_profile_data*>(VoidPtrInc(pMappedPtr, m_DataLast));
+            DataFirst = prof_data.data();
+            DataLast = prof_data.data() + prof_data.size();
             NamesFirst = static_cast<const char*>(VoidPtrInc(pMappedPtr, m_NamesFirst));
             NamesLast = static_cast<const char*>(VoidPtrInc(pMappedPtr, m_NamesLast));
-            CountersFirst = static_cast<uint64*>(VoidPtrInc(pMappedPtr, m_CountersFirst));
+            CountersFirst = reinterpret_cast<uint64*>(pCountersPtr);
             CountersLast = static_cast<uint64*>(VoidPtrInc(pMappedPtr, m_CountersLast));
             OrderFileFirst = static_cast<uint32*>(VoidPtrInc(pMappedPtr, m_OrderFileFirst));
 
