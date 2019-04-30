@@ -140,7 +140,6 @@ protected:
     bool IsInternal() const { return m_flags.isInternal != 0; }
     // Write profiling data to file for profile-guided optimizations.
     void DumpPgoData();
-    void PrintText(void* pMappedPtr, size_t offset, size_t length);
 
     Result PerformRelocationsAndUploadToGpuMemory(
         const AbiProcessor&       abiProcessor,

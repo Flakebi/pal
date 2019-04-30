@@ -143,19 +143,15 @@ static void PrintHexll(const void* voidptr, size_t length)
 // =====================================================================================================================
 void Pipeline::DumpPgoData()
 {
-    if (m_DataFirst)
+    const char* filename = getenv("AMDVLK_PROFILE_FILE");
+
+    if (m_DataFirst && filename)
     {
         void* pMappedPtr;
         Result result = m_gpuMem.Map(&pMappedPtr);
         if (result == Result::Success)
         {
             puts("Dumping PGO data");
-            /*printf("Profile data: ");
-            PrintHexll(VoidPtrInc(pMappedPtr, m_DataFirst), m_DataLast - m_DataFirst);
-            printf("Profile counter: ");
-            PrintHexll(VoidPtrInc(pMappedPtr, m_CountersFirst), m_CountersLast - m_CountersFirst);
-            printf("Profile names: ");
-            PrintHexll(VoidPtrInc(pMappedPtr, m_NamesFirst), m_NamesLast - m_NamesFirst);*/
 
             // TODO We do not need to upload the names to the GPU, we can use
             // the local address here (in the pipeline elf).
@@ -175,6 +171,42 @@ void Pipeline::DumpPgoData()
                 data.CounterPtr += ptrDiff;
             }
 
+            // Replace %i with pipeline id
+            bool isEscaped = false; // If the next character is escaped
+            char expandedFilename[512] = { };
+            size_t j = 0;
+            for (size_t i = 0; j < sizeof(expandedFilename) && filename[i]; i++, j++)
+            {
+                if (isEscaped && filename[i] == 'i')
+                {
+                    j--;
+                    int written = Snprintf(expandedFilename + j,
+                        sizeof(expandedFilename) - j,
+                        "0x%016llX",
+                        m_info.internalPipelineHash.stable);
+                    if (written < 0)
+                    {
+                        printf("Failed to write pipeline hash\n");
+                        return;
+                    }
+                    j += written - 1;
+
+                    continue;
+                }
+
+                expandedFilename[j] = filename[i];
+                if (!isEscaped && filename[i] == '%')
+                    isEscaped = true;
+            }
+
+            if (j >= sizeof(expandedFilename))
+            {
+                printf("Failed to write pipeline hash\n");
+                return;
+            }
+
+            expandedFilename[j] = 0;
+
             // We access global variables, only one pipeline should be able to do
             // this simultaneously.
             MutexAuto lock(&LlvmProfileMutex);
@@ -189,27 +221,7 @@ void Pipeline::DumpPgoData()
             OrderFileFirst = static_cast<uint32*>(VoidPtrInc(pMappedPtr, m_OrderFileFirst));
 
             // Write profile data
-            // Set filename based on pipeline hash:
-            // Debug dir + /pgo/Pipeline_<hash>.profraw
-            const char* debugDir = m_pDevice->GetDebugFilePath();
-            char fileName[512] = { };
-            Snprintf(&fileName[0],
-                     sizeof(fileName),
-                     "%s/pgo",
-                     debugDir);
-            // Create directory
-            MkDirRecursively(fileName);
-
-            Snprintf(&fileName[0],
-                     sizeof(fileName),
-                     "%s/pgo/Pipeline_0x%016llX.profraw",
-                     debugDir,
-                     m_info.internalPipelineHash.stable);
-
-            // Remove file if it exists, ignore errors if it failed
-            remove(fileName);
-
-            __llvm_profile_set_filename(fileName);
+            __llvm_profile_set_filename(expandedFilename);
             int result = __llvm_profile_dump();
             if (result)
             {
@@ -224,17 +236,6 @@ void Pipeline::DumpPgoData()
         }
 
     }
-}
-
-// =====================================================================================================================
-void Pipeline::PrintText(void* pMappedPtr, size_t offset, size_t length)
-{
-    pMappedPtr = VoidPtrInc(pMappedPtr, offset);
-    unsigned int* ptr = static_cast<unsigned int*>(pMappedPtr);
-    printf("Text: ");
-    for (size_t i = 0; i < length / sizeof(*ptr); i++)
-        printf("0x%08x, ", ptr[i]);
-    puts("");
 }
 
 // =====================================================================================================================
@@ -276,11 +277,6 @@ Result Pipeline::PerformRelocationsAndUploadToGpuMemory(
 
         if (!IsInternal())
         {
-            printf("GPU offset address: 0x%llx\n", gpuVirtAddr);
-            mapping.DebugPrint();
-            printf("Uploaded pipeline\n");
-            PrintText(pUploader->MappedAddr(), pUploader->TextOffset(), pUploader->TextLength());
-
             // Set PGO section offsets
             auto elfProcessor = abiProcessor.GetElfProcessor();
             auto sections = elfProcessor->GetSections();
