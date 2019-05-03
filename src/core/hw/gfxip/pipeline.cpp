@@ -143,7 +143,7 @@ static void PrintHexll(const void* voidptr, size_t length)
 // =====================================================================================================================
 void Pipeline::DumpPgoData()
 {
-    const char* filename = getenv("AMDVLK_PROFILE_FILE");
+    const char* filename = getenv("AMDVLK_PROFILE_INSTR_GEN");
 
     if (m_DataFirst && filename)
     {
