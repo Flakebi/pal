@@ -38,7 +38,7 @@
 #include "palMsgPackImpl.h"
 #include "palInlineFuncs.h"
 #include "palHashLiteralString.h"
-#include "palPipelineGpuMapping.h"
+#include "palSectionMemoryMap.h"
 #include "g_palPipelineAbiMetadataImpl.h"
 
 namespace Util
@@ -507,10 +507,10 @@ void PipelineAbiProcessor<Allocator>::GetMetadataVersion(
 // =====================================================================================================================
 template <typename Allocator>
 Result PipelineAbiProcessor<Allocator>::RelocationHelper(
-    void*                                pDstBuffer,
-    gpusize                              gpuVirtAddr,
-    const Elf::Section<Allocator>*       pRelocationSection,
-    const PipelineSectionSegmentMapping& mapping
+    void*                          pDstBuffer,
+    gpusize                        gpuVirtAddr,
+    const Elf::Section<Allocator>* pRelocationSection,
+    const SectionMemoryMap&        mapping
     ) const
 {
     bool isRela = pRelocationSection->GetType() == Elf::SectionHeaderType::Rela;
@@ -629,7 +629,7 @@ template <typename Allocator>
 Result PipelineAbiProcessor<Allocator>::ApplyRelocations(
     void*   pDstBuffer,
     gpusize gpuVirtAddr,
-    const PipelineSectionSegmentMapping& mapping
+    const SectionMemoryMap& mapping
     ) const
 {
     // Iterate through all REL sections
@@ -681,7 +681,7 @@ Result PipelineAbiProcessor<Allocator>::Finalize(
             if (symbolProcessor.Add(PipelineAbiSymbolNameStrings[static_cast<uint32>(pipeSymb.type)],
                                     Elf::SymbolTableEntryBinding::Local,
                                     pipeSymb.entryType,
-                                    pipeSymp.sectionIndex,
+                                    pipeSymb.sectionIndex,
                                     pipeSymb.value,
                                     pipeSymb.size) == UINT_MAX)
             {
@@ -757,7 +757,6 @@ template <typename Allocator>
 void PipelineAbiProcessor<Allocator>::SaveToBuffer(
     void* pBuffer)
 {
-    PAL_ASSERT(m_pTextSection         != nullptr);
     PAL_ASSERT(m_pNoteSection         != nullptr);
     PAL_ASSERT(m_pSymbolSection       != nullptr);
     PAL_ASSERT(m_pSymbolStrTabSection != nullptr);
@@ -812,16 +811,6 @@ Result PipelineAbiProcessor<Allocator>::LoadFromBuffer(
 
     if (result == Result::Success)
     {
-        m_pTextSection         = m_elfProcessor.GetSections()->Get(".text");
-        m_pDataSection         = m_elfProcessor.GetSections()->Get(".data");
-        m_pRoDataSection       = m_elfProcessor.GetSections()->Get(".rodata");
-
-        m_pRelTextSection      = m_elfProcessor.GetSections()->Get(".rel.text");
-        m_pRelDataSection      = m_elfProcessor.GetSections()->Get(".rel.data");
-
-        m_pRelaTextSection     = m_elfProcessor.GetSections()->Get(".rela.text");
-        m_pRelaDataSection     = m_elfProcessor.GetSections()->Get(".rela.data");
-
         m_pSymbolSection       = m_elfProcessor.GetSections()->Get(".symtab");
         if (m_pSymbolSection)
         {
@@ -837,8 +826,7 @@ Result PipelineAbiProcessor<Allocator>::LoadFromBuffer(
         m_flags.u32All         = m_elfProcessor.GetFileHeader()->e_flags;
 
         // Check that all required sections are present
-        if ((m_pTextSection == nullptr)   ||
-            (m_pNoteSection == nullptr)   ||
+        if ((m_pNoteSection == nullptr)   ||
             (m_pSymbolSection == nullptr) ||
             (m_pSymbolStrTabSection == nullptr))
         {

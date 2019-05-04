@@ -38,7 +38,7 @@
 
 namespace Util
 {
-class PipelineSectionSegmentMapping;
+class SectionMemoryMap;
 
 namespace Abi
 {
@@ -263,7 +263,7 @@ public:
     Result ApplyRelocations(
         void*   pDstBuffer,
         gpusize gpuVirtAddr,
-        const PipelineSectionSegmentMapping& mapping) const;
+        const SectionMemoryMap& mapping) const;
 
     /// Finalizes the ABI filling out all the elf structures. Call this and
     /// make custom changes with the returned ElfProcessor before calling
@@ -309,10 +309,10 @@ public:
 
 private:
     Result RelocationHelper(
-        void*                                pDstBuffer,
-        gpusize                              gpuVirtAddr,
-        const Elf::Section<Allocator>*       pRelocationSection,
-        const PipelineSectionSegmentMapping& mapping) const;
+        void*                          pDstBuffer,
+        gpusize                        gpuVirtAddr,
+        const Elf::Section<Allocator>* pRelocationSection,
+        const SectionMemoryMap&        mapping) const;
 
     Result TranslateLegacyMetadata(MsgPackReader* pReader, PalCodeObjectMetadata* pOut) const;
 

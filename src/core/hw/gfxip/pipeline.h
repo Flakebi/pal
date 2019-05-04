@@ -34,6 +34,7 @@
 #include "palSparseVectorImpl.h"
 #include "palPipeline.h"
 #include "palPipelineAbiProcessor.h"
+#include "palSectionMemoryMap.h"
 
 namespace Pal
 {
@@ -218,12 +219,11 @@ public:
     virtual ~PipelineUploader();
 
     Result Begin(
-        Device*                        pDevice,
-        const AbiProcessor&            abiProcessor,
-        const CodeObjectMetadata&      metadata,
-        PerfDataInfo*                 pPerfDataInfoList,
-        bool                          preferNonLocalHeap,
-        Util::PipelineSectionSegmentMapping& mapping);
+        Device*                   pDevice,
+        const AbiProcessor&       abiProcessor,
+        const CodeObjectMetadata& metadata,
+        PerfDataInfo*             pPerfDataInfoList,
+        bool                      preferNonLocalHeap);
 
     void End();
 
@@ -238,16 +238,14 @@ public:
     gpusize GpuMemSize() const { return m_gpuMemSize; }
     gpusize GpuMemOffset() const { return m_baseOffset; }
 
-    gpusize CodeGpuVirtAddr() const { return m_codeGpuVirtAddr; }
-    gpusize DataGpuVirtAddr() const { return m_dataGpuVirtAddr; }
+    Util::SectionMemoryMap& SectionMapping() { return m_mapping; }
+    const Util::SectionMemoryMap& SectionMapping() const { return m_mapping; }
+
     gpusize CtxRegGpuVirtAddr() const { return m_ctxRegGpuVirtAddr; }
     gpusize ShRegGpuVirtAddr() const { return m_shRegGpuVirtAddr; }
 
     gpusize PrefetchAddr() const { return m_prefetchGpuVirtAddr; }
     gpusize PrefetchSize() const { return m_prefetchSize; }
-
-    size_t TextOffset() const { return m_textOffset; }
-    size_t TextLength() const { return m_textLength; }
 
 protected:
     // Writes a context register offset and value to the mapped region where registers are stored in GPU memory.
@@ -271,19 +269,17 @@ private:
     gpusize     m_baseOffset;
     gpusize     m_gpuMemSize;
 
+    Util::SectionMemoryMap m_mapping;
+
     gpusize     m_prefetchGpuVirtAddr;
     gpusize     m_prefetchSize;
 
-    gpusize  m_codeGpuVirtAddr;
-    gpusize  m_dataGpuVirtAddr;
     gpusize  m_ctxRegGpuVirtAddr;
     gpusize  m_shRegGpuVirtAddr;
 
     const uint32  m_shRegisterCount;
     const uint32  m_ctxRegisterCount;
 
-    size_t   m_textOffset;
-    size_t   m_textLength;
     void*    m_pMappedPtr;
     uint32*  m_pCtxRegWritePtr;
     uint32*  m_pShRegWritePtr;

@@ -45,26 +45,19 @@ struct SectionInfo
 };
 
 // =====================================================================================================================
-// Stores the mapping from ELF sections to ELF segments.
-// This has the function of an ELF segment. As shaders are not linked, there
-// are no standard ELF segments and this class is used to group sections with
-// the same flags.
-class PipelineSectionSegmentMapping
+// Stores the mapping from ELF sections to GPU memory offsets.
+class SectionMemoryMap
 {
 public:
-    PipelineSectionSegmentMapping(uint64 flags) :
-        m_flags(flags),
+    SectionMemoryMap() :
         m_alignment(0),
         m_size(0)
     {}
-    virtual ~PipelineSectionSegmentMapping() {}
+    virtual ~SectionMemoryMap() {}
 
     template <typename Allocator>
     void AddSection(const Util::Elf::Section<Allocator> *const section)
     {
-        //PAL_ASSERT(section->GetSetcionHeader().sh_flags == m_flags
-        //    && "All sections in a segment must have the same flags");
-
         SectionInfo info;
         info.id = section->GetIndex();
         uint64 alignment = section->GetSectionHeader()->sh_addralign;
@@ -80,7 +73,6 @@ public:
     uint32 GetNumSections() const { return m_sections.size(); }
     uint32 GetSectionIndex(size_t i) const { return m_sections[i].id; }
     uint64 GetAlignment() const { return m_alignment; }
-    gpusize GetFlags() const { return m_flags; }
     gpusize GetSize() const { return m_size; }
     Result GetSectionOffset(uint32 sectionIndex, gpusize *offset) const
     {
@@ -104,63 +96,11 @@ public:
     }
 
 private:
-    uint64 m_flags;
     uint64 m_alignment;
     gpusize m_size;
     std::vector<SectionInfo> m_sections;
 
-    PAL_DISALLOW_DEFAULT_CTOR(PipelineSectionSegmentMapping);
-    PAL_DISALLOW_COPY_AND_ASSIGN(PipelineSectionSegmentMapping);
-};
-
-// =====================================================================================================================
-// Stores the mapping from ELF segments to GPU memory.
-class PipelineGpuMapping
-{
-public:
-    PipelineGpuMapping() {}
-    virtual ~PipelineGpuMapping() {}
-
-    template <typename Allocator>
-    void AddSection(const Util::Elf::Section<Allocator> *const section)
-    {
-        uint64 flags = section->GetSectionHeader().sh_flags;
-        // Check if we have a segment with these flags
-        for (auto& segment : m_segments)
-        {
-            if (segment.GetFlags() == flags)
-            {
-                segment.AddSection(section);
-                return;
-            }
-        }
-
-        // Create new segment
-        PipelineSectionSegmentMapping m(flags);
-        m.AddSection(section);
-        m_segments.push_back(std::move(m));
-    }
-
-    size_t GetSegmentCount() const { return m_segments.size(); }
-    PipelineSectionSegmentMapping& GetSegment(size_t i) { return m_segments[i]; }
-    Result GetSectionPosition(uint32 sectionIndex, uint64 sectionFlags, size_t *segmentIndex, gpusize *offset) const
-    {
-        auto numSegments = m_segments.size();
-        for (size_t i = 0; i < numSegments; i++)
-        {
-            if (m_segments[i].GetFlags() == sectionFlags)
-            {
-                *segmentIndex = i;
-                return m_segments[i].GetSectionOffset(sectionIndex, offset);
-            }
-        }
-        return Result::ErrorUnavailable;
-    }
-
-private:
-    std::vector<PipelineSectionSegmentMapping> m_segments;
-
-    PAL_DISALLOW_COPY_AND_ASSIGN(PipelineGpuMapping);
+    PAL_DISALLOW_COPY_AND_ASSIGN(SectionMemoryMap);
 };
 
 } // Pal
