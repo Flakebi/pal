@@ -55,13 +55,6 @@ template <typename Allocator>
 PipelineAbiProcessor<Allocator>::PipelineAbiProcessor(
     Allocator* const pAllocator)
     :
-    m_pTextSection(nullptr),
-    m_pDataSection(nullptr),
-    m_pRoDataSection(nullptr),
-    m_pRelTextSection(nullptr),
-    m_pRelDataSection(nullptr),
-    m_pRelaTextSection(nullptr),
-    m_pRelaDataSection(nullptr),
     m_pSymbolSection(nullptr),
     m_pSymbolStrTabSection(nullptr),
     m_pNoteSection(nullptr),
@@ -161,83 +154,6 @@ void PipelineAbiProcessor<Allocator>::SetGfxIpVersion(
         PAL_ASSERT_ALWAYS();
         break;
     }
-}
-
-// =====================================================================================================================
-template <typename Allocator>
-Result PipelineAbiProcessor<Allocator>::SetPipelineCode(
-    const void* pCode,
-    size_t      codeSize)
-{
-    Result result = Result::Success;
-    if (m_pTextSection == nullptr)
-    {
-        result = CreateTextSection();
-    }
-
-    if (result == Result::Success)
-    {
-        if (nullptr == m_pTextSection->SetData(pCode, codeSize))
-        {
-            result = Result::ErrorOutOfMemory;
-        }
-    }
-
-    return result;
-}
-
-// =====================================================================================================================
-template <typename Allocator>
-Result PipelineAbiProcessor<Allocator>::SetData(
-    const void* pData,
-    size_t      dataSize,
-    gpusize     alignment)
-{
-    PAL_ASSERT(Pow2Align(alignment, DataMinBaseAddrAlignment) == alignment);
-
-    Result result = Result::Success;
-    if (m_pDataSection == nullptr)
-    {
-        result = CreateDataSection();
-    }
-
-    if (result == Result::Success)
-    {
-        m_pDataSection->SetAlignment(alignment);
-        if (nullptr == m_pDataSection->SetData(pData, dataSize))
-        {
-            result = Result::ErrorOutOfMemory;
-        }
-    }
-
-    return result;
-}
-
-// =====================================================================================================================
-template <typename Allocator>
-Result PipelineAbiProcessor<Allocator>::SetReadOnlyData(
-    const void* pData,
-    size_t      dataSize,
-    gpusize     alignment)
-{
-    PAL_ASSERT(Pow2Align(alignment, RoDataMinBaseAddrAlignment) == alignment);
-
-    Result result = Result::Success;
-    if (m_pRoDataSection == nullptr)
-    {
-        result = CreateRoDataSection();
-    }
-
-    if (result == Result::Success)
-    {
-        m_pRoDataSection->SetAlignment(alignment);
-        if (nullptr == m_pRoDataSection->SetData(pData, dataSize))
-        {
-            result = Result::ErrorOutOfMemory;
-        }
-    }
-
-    return result;
 }
 
 // =====================================================================================================================
@@ -359,64 +275,6 @@ void PipelineAbiProcessor<Allocator>::GetMetadata(
 {
     *ppMetadata    = m_pMetadata;
     *pMetadataSize = m_metadataSize;
-}
-
-// =====================================================================================================================
-template <typename Allocator>
-void PipelineAbiProcessor<Allocator>::GetPipelineCode(
-    const void** ppCode,
-    size_t*      pCodeSize
-    ) const
-{
-    if (m_pTextSection != nullptr)
-    {
-        *ppCode    = m_pTextSection->GetData();
-        *pCodeSize = m_pTextSection->GetDataSize();
-    }
-    else
-    {
-        *ppCode = nullptr;
-    }
-}
-
-// =====================================================================================================================
-template <typename Allocator>
-void PipelineAbiProcessor<Allocator>::GetData(
-    const void** ppData,
-    size_t*      pDataSize,
-    gpusize*     pAlignment
-    ) const
-{
-    if (m_pDataSection != nullptr)
-    {
-        *ppData     = m_pDataSection->GetData();
-        *pDataSize  = m_pDataSection->GetDataSize();
-        *pAlignment = static_cast<gpusize>(m_pDataSection->GetSectionHeader()->sh_addralign);
-    }
-    else
-    {
-        *ppData = nullptr;
-    }
-}
-
-// =====================================================================================================================
-template <typename Allocator>
-void PipelineAbiProcessor<Allocator>::GetReadOnlyData(
-    const void** ppData,
-    size_t*      pDataSize,
-    gpusize*     pAlignment
-    ) const
-{
-    if (m_pRoDataSection != nullptr)
-    {
-        *ppData     = m_pRoDataSection->GetData();
-        *pDataSize  = m_pRoDataSection->GetDataSize();
-        *pAlignment = static_cast<gpusize>(m_pRoDataSection->GetSectionHeader()->sh_addralign);
-    }
-    else
-    {
-        *ppData = nullptr;
-    }
 }
 
 // =====================================================================================================================
@@ -820,32 +678,10 @@ Result PipelineAbiProcessor<Allocator>::Finalize(
         {
             Abi::PipelineSymbolEntry pipeSymb = iter.Get();
 
-            uint32 sectionIndex = 0;
-            switch (pipeSymb.sectionType)
-            {
-            case AbiSectionType::Undefined:
-                break;
-            case AbiSectionType::Code:
-                sectionIndex = m_pTextSection->GetIndex();
-                break;
-            case AbiSectionType::Data:
-                sectionIndex = m_pDataSection->GetIndex();
-                break;
-            case AbiSectionType::Disassembly:
-                sectionIndex = m_pDisasmSection->GetIndex();
-                break;
-            case AbiSectionType::AmdIl:
-                sectionIndex = m_pAmdIlSection->GetIndex();
-                break;
-            default:
-                PAL_NEVER_CALLED();
-                break;
-            }
-
             if (symbolProcessor.Add(PipelineAbiSymbolNameStrings[static_cast<uint32>(pipeSymb.type)],
                                     Elf::SymbolTableEntryBinding::Local,
                                     pipeSymb.entryType,
-                                    static_cast<uint16>(sectionIndex),
+                                    pipeSymp.sectionIndex,
                                     pipeSymb.value,
                                     pipeSymb.size) == UINT_MAX)
             {
@@ -858,32 +694,10 @@ Result PipelineAbiProcessor<Allocator>::Finalize(
         {
             Abi::GenericSymbolEntry symbol = iter.Get()->value;
 
-            uint32 sectionIndex = 0;
-            switch (symbol.sectionType)
-            {
-            case AbiSectionType::Undefined:
-                break;
-            case AbiSectionType::Code:
-                sectionIndex = m_pTextSection->GetIndex();
-                break;
-            case AbiSectionType::Data:
-                sectionIndex = m_pDataSection->GetIndex();
-                break;
-            case AbiSectionType::Disassembly:
-                sectionIndex = m_pDisasmSection->GetIndex();
-                break;
-            case AbiSectionType::AmdIl:
-                sectionIndex = m_pAmdIlSection->GetIndex();
-                break;
-            default:
-                PAL_NEVER_CALLED();
-                break;
-            }
-
             if (symbolProcessor.Add(symbol.pName,
                                     Elf::SymbolTableEntryBinding::Local,
                                     symbol.entryType,
-                                    static_cast<uint16>(sectionIndex),
+                                    symbol.sectionIndex,
                                     symbol.value,
                                     symbol.size) == UINT_MAX)
             {
@@ -1184,110 +998,16 @@ Result PipelineAbiProcessor<Allocator>::LoadFromBuffer(
 
             symbolProcessor.Get(i, &pName, &binding, &type, &sectionIndex, &value, &size);
 
-            AbiSectionType sectionType = AbiSectionType::Undefined;
-
-            if (sectionIndex == m_pTextSection->GetIndex())
-            {
-                sectionType = AbiSectionType::Code;
-            }
-            else if ((m_pDataSection != nullptr) && (sectionIndex == m_pDataSection->GetIndex()))
-            {
-                sectionType = AbiSectionType::Data;
-            }
-            else if ((m_pDisasmSection != nullptr) && (sectionIndex == m_pDisasmSection->GetIndex()))
-            {
-                sectionType = AbiSectionType::Disassembly;
-            }
-            else if ((m_pAmdIlSection != nullptr) && (sectionIndex == m_pAmdIlSection->GetIndex()))
-            {
-                sectionType = AbiSectionType::AmdIl;
-            }
-            else if (sectionIndex != 0)
-            {
-                printf("Symbol %s (%u) refers to invalid section %u\n", pName, i, sectionIndex);
-                PAL_ASSERT_ALWAYS();
-            }
-
             const PipelineSymbolType pipelineSymbolType = GetSymbolTypeFromName(pName);
             if (pipelineSymbolType != PipelineSymbolType::Unknown)
             {
-                result = AddPipelineSymbolEntry({pipelineSymbolType, type, sectionType, value, size});
+                result = AddPipelineSymbolEntry({pipelineSymbolType, type, sectionIndex, value, size});
             }
             else
             {
-                result = AddGenericSymbolEntry({pName, type, sectionType, value, size});
+                result = AddGenericSymbolEntry({pName, type, sectionIndex, value, size});
             }
         }
-    }
-
-    return result;
-}
-
-// =====================================================================================================================
-template <typename Allocator>
-Result PipelineAbiProcessor<Allocator>::CreateDataSection()
-{
-    PAL_ASSERT(m_pDataSection == nullptr);
-
-    Result result = Result::Success;
-
-    m_pDataSection = m_elfProcessor.GetSections()->Add(Elf::SectionType::Data);
-
-    if (m_pDataSection == nullptr)
-    {
-        // This object gets cleaned-up by the Sections<> helper class, so we can just zero the
-        // pointer here without worrying about leaks.
-        m_pDataSection = nullptr;
-
-        result = Result::ErrorOutOfMemory;
-    }
-
-    return result;
-}
-
-// =====================================================================================================================
-template <typename Allocator>
-Result PipelineAbiProcessor<Allocator>::CreateRoDataSection()
-{
-    PAL_ASSERT(m_pRoDataSection == nullptr);
-
-    Result result = Result::Success;
-
-    m_pRoDataSection     = m_elfProcessor.GetSections()->Add(Elf::SectionType::RoData);
-
-    if (m_pRoDataSection == nullptr)
-    {
-        // This object gets cleaned-up by the Sections<> helper class, so we can just zero the
-        // pointer here without worrying about leaks.
-        m_pRoDataSection = nullptr;
-
-        result = Result::ErrorOutOfMemory;
-    }
-
-    return result;
-}
-
-// =====================================================================================================================
-template <typename Allocator>
-Result PipelineAbiProcessor<Allocator>::CreateTextSection()
-{
-    PAL_ASSERT(m_pTextSection == nullptr);
-
-    Result result = Result::Success;
-
-    m_pTextSection         = m_elfProcessor.GetSections()->Add(Elf::SectionType::Text);
-
-    if (m_pTextSection == nullptr)
-    {
-        // This object gets cleaned-up by the Sections<> helper class, so we can just zero the
-        // pointer here without worrying about leaks.
-        m_pTextSection = nullptr;
-
-        result = Result::ErrorOutOfMemory;
-    }
-    else
-    {
-        m_pTextSection->SetAlignment(PipelineShaderBaseAddrAlignment);
     }
 
     return result;

@@ -761,7 +761,7 @@ struct PipelineSymbolEntry
 {
     PipelineSymbolType        type;
     Elf::SymbolTableEntryType entryType;
-    AbiSectionType            sectionType;
+    uint16                    sectionIndex;
     uint64                    value;
     uint64                    size;
 };
@@ -772,7 +772,7 @@ struct GenericSymbolEntry
 {
     const char*               pName;
     Elf::SymbolTableEntryType entryType;
-    AbiSectionType            sectionType;
+    uint16                    sectionIndex;
     uint64                    value;
     uint64                    size;
 };

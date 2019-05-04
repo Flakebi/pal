@@ -96,40 +96,6 @@ public:
         uint32 gfxIpMinorVer,
         uint32 gfxIpStepping);
 
-    /// Set the pipeline shader code.
-    ///
-    /// @param [in] pCode           Pointer to the pipeline shader code.
-    /// @param [in] codeSize        The size of the pipeline shader code in bytes.
-    ///
-    /// @returns Success if successful, ErrorOutOfMemory if memory allocation fails.
-    Result SetPipelineCode(
-        const void* pCode,
-        size_t      codeSize);
-
-    /// Set the pipeline data.
-    ///
-    /// @param [in] pData           Pointer to the pipeline data.
-    /// @param [in] dataSize        The size of the pipeline data in bytes.
-    /// @param [in] alignment       The alignment of the pipeline data.
-    ///
-    /// @returns Success if successful, ErrorOutOfMemory if memory allocation fails.
-    Result SetData(
-        const void* pData,
-        size_t      dataSize,
-        gpusize     alignment);
-
-    /// Set the pipeline read only data.
-    ///
-    /// @param [in] pData           Pointer to the pipeline read only data.
-    /// @param [in] dataSize        The size of the pipeline read only data in bytes.
-    /// @param [in] alignment       The alignment of the pipeline read only data.
-    ///
-    /// @returns Success if successful, ErrorOutOfMemory if memory allocation fails.
-    Result SetReadOnlyData(
-        const void* pData,
-        size_t      dataSize,
-        gpusize     alignment);
-
     /// Set the pipelines' disassembly data.  This should contain disassembly for all shader stages in the
     /// pipeline.  Each shader stage has an associated symbol type which defines the size and offset to the
     /// disassembly data for that stage.
@@ -161,14 +127,6 @@ public:
     ///
     /// @returns Success if successful, ErrorOutOfMemory if memory allocation fails.
     Result SetComment(const char* pComment);
-
-    /// Check if data has been added.
-    ///
-    bool HasData() const
-        { return (m_pDataSection != nullptr); }
-
-    bool HasReadOnlyData() const
-        { return (m_pRoDataSection != nullptr); }
 
     /// Check if a PipelineSymbolEntry exists.
     ///
@@ -227,34 +185,6 @@ public:
     void GetMetadata(
         const void** ppMetadata,
         size_t*      pMetadataSize) const;
-
-    /// Get the pipeline shader code.
-    ///
-    /// @param [out] ppCode           Pointer to the pipeline shader code.
-    /// @param [out] pCodeSize        The size of the pipeline shader code in bytes.
-    void GetPipelineCode(
-        const void** ppCode,
-        size_t*      pCodeSize) const;
-
-    /// Get the pipeline data.
-    ///
-    /// @param [out] ppData           Pointer to the pipeline data.
-    /// @param [out] pDataSize        The size of the pipeline data in bytes.
-    /// @param [out] pAlignment       The alignment of the pipeline data.
-    void GetData(
-        const void** ppData,
-        size_t*      pDataSize,
-        gpusize*     pAlignment) const;
-
-    /// Get the pipeline read only data.
-    ///
-    /// @param [out] ppData           Pointer to the pipeline read only data.
-    /// @param [out] pDataSize        The size of the pipeline read only data in bytes.
-    /// @param [out] pAlignment       The alignment of the pipeline read only data.
-    void GetReadOnlyData(
-        const void** ppData,
-        size_t*      pDataSize,
-        gpusize*     pAlignment) const;
 
     /// Get the comment which contains compiler version info.
     ///
@@ -354,11 +284,6 @@ public:
     /// @returns A pointer to an ElfProcessor to allow additional queries.
     const Elf::ElfProcessor<Allocator>* GetElfProcessor() const { return &m_elfProcessor; }
 
-    Elf::Section<Allocator>* GetTextSection() { return m_pTextSection; }
-    const Elf::Section<Allocator>* GetTextSection() const { return m_pTextSection; }
-    Elf::Section<Allocator>* GetDataSection() { return m_pDataSection; }
-    const Elf::Section<Allocator>* GetDataSection() const { return m_pDataSection; }
-
     /// Gets the number of bytes required to hold a binary blob of the ELF.
     ///
     /// @returns Returns the size of the ELF in bytes.
@@ -394,16 +319,6 @@ private:
     Result CreateDataSection();
     Result CreateRoDataSection();
     Result CreateTextSection();
-
-    Elf::Section<Allocator>* m_pTextSection;         // Contains executable machine code for all shader stages.
-    Elf::Section<Allocator>* m_pDataSection;         // Data
-    Elf::Section<Allocator>* m_pRoDataSection;       // Read only data
-
-    Elf::Section<Allocator>* m_pRelTextSection;      // Rel for text section.
-    Elf::Section<Allocator>* m_pRelDataSection;      // Rel for data section.
-
-    Elf::Section<Allocator>* m_pRelaTextSection;     // Rela for text section.
-    Elf::Section<Allocator>* m_pRelaDataSection;     // Rela for data section.
 
     Elf::Section<Allocator>* m_pSymbolSection;       // Symbols
     Elf::Section<Allocator>* m_pSymbolStrTabSection; // Symbol String Table
