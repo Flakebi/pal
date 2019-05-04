@@ -730,8 +730,6 @@ Result PipelineUploader::Begin(
             m_mapping.AddSection(section);
     }
     createInfo.size = m_mapping.GetSize();
-    printf("Size: %zu\n", m_mapping.GetSize());
-    m_mapping.DebugPrint();
 
     const uint32 totalRegisters = (m_ctxRegisterCount + m_shRegisterCount);
     if (totalRegisters > 0)
@@ -917,7 +915,6 @@ Result PipelineUploader::GetPipelineSymbolGpuVirtAddr(
     if (result != Result::Success)
         return result;
 
-    printf("Resolved symbol %u to %llx + %llx + %llx\n", type, pEntry->value, m_pGpuMemory->Desc().gpuVirtAddr, offset);
     pEntry->value += offset;
     pEntry->value += m_pGpuMemory->Desc().gpuVirtAddr;
     pEntry->value += m_baseOffset;
