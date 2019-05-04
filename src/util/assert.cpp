@@ -66,6 +66,7 @@ void EnableAssertMode(
 bool IsAssertCategoryEnabled(
     AssertCategory category) // Assert category to check
 {
+    return true;
     return g_assertCatTable[category].enable;
 }
 

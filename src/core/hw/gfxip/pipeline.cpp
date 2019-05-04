@@ -715,12 +715,23 @@ Result PipelineUploader::Begin(
         uint32 flags = section->GetSectionHeader()->sh_flags;
         if ((flags & Elf::ShfWrite)
             || (flags & Elf::ShfExecInstr)
-            // TODO Why is the Note section marked as alloc by LLVM?
+            // We do not want to allocate every section that is alloc-only
+            // because in the ClearBuffer pipeline, we get an alignment of 0 for
+            // some section.
+            // So we only add sections here starting with __llvm_prf which
+            // contain PGO data.
             || ((flags & Elf::ShfAlloc)
-                && (section->GetType() != Elf::SectionHeaderType::Note)))
+                && (strncmp("__llvm_prf", section->GetName(), strlen("__llvm_prf")) == 0)))
+
+            // TODO Why is the Note section marked as alloc by LLVM?
+            // And this does not work…
+            //|| ((flags & Elf::ShfAlloc)
+                //&& (section->GetType() != Elf::SectionHeaderType::Note)))
             m_mapping.AddSection(section);
     }
     createInfo.size = m_mapping.GetSize();
+    printf("Size: %zu\n", m_mapping.GetSize());
+    m_mapping.DebugPrint();
 
     const uint32 totalRegisters = (m_ctxRegisterCount + m_shRegisterCount);
     if (totalRegisters > 0)
@@ -906,7 +917,10 @@ Result PipelineUploader::GetPipelineSymbolGpuVirtAddr(
     if (result != Result::Success)
         return result;
 
+    printf("Resolved symbol %u to %llx + %llx + %llx\n", type, pEntry->value, m_pGpuMemory->Desc().gpuVirtAddr, offset);
     pEntry->value += offset;
+    pEntry->value += m_pGpuMemory->Desc().gpuVirtAddr;
+    pEntry->value += m_baseOffset;
 
     return Result::Success;
 }
@@ -927,6 +941,8 @@ Result PipelineUploader::GetGenericSymbolGpuVirtAddr(
         return result;
 
     pEntry->value += offset;
+    pEntry->value += m_pGpuMemory->Desc().gpuVirtAddr;
+    pEntry->value += m_baseOffset;
 
     return Result::Success;
 }
