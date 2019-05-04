@@ -88,13 +88,16 @@ void ComputePipeline::GetFunctionGpuVirtAddrs(
     ComputePipelineIndirectFuncInfo* pFuncInfoList,
     uint32                           funcCount)
 {
-    const gpusize codeGpuVirtAddr = uploader.CodeGpuVirtAddr();
     for (uint32 i = 0; i < funcCount; ++i)
     {
         Abi::GenericSymbolEntry symbol = { };
-        if (abiProcessor.HasGenericSymbolEntry(pFuncInfoList[i].pSymbolName, &symbol))
+        Result result = uploader.GetGenericSymbolGpuVirtAddr(
+            abiProcessor,
+            pFuncInfoList[i].pSymbolName,
+            &symbol);
+        if (result == Result::Success)
         {
-            pFuncInfoList[i].gpuVirtAddr = (codeGpuVirtAddr + symbol.value);
+            pFuncInfoList[i].gpuVirtAddr = symbol.value;
         }
     }
 }

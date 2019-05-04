@@ -247,6 +247,16 @@ public:
     gpusize PrefetchAddr() const { return m_prefetchGpuVirtAddr; }
     gpusize PrefetchSize() const { return m_prefetchSize; }
 
+    // As HasPipelineSymbolEntry but pEntry.value contains an absolute address to virtual gpu memory
+    Result GetPipelineSymbolGpuVirtAddr(
+        const AbiProcessor& abiProcessor,
+        Util::Abi::PipelineSymbolType type,
+        Util::Abi::PipelineSymbolEntry* pEntry) const;
+    Result GetGenericSymbolGpuVirtAddr(
+        const AbiProcessor& abiProcessor,
+        const char* pName,
+        Util::Abi::GenericSymbolEntry* pEntry) const;
+
 protected:
     // Writes a context register offset and value to the mapped region where registers are stored in GPU memory.
     PAL_INLINE void AddCtxRegister(uint16 offset, uint32 value)

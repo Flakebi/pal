@@ -453,7 +453,7 @@ Result Pipeline::GetShaderCode(
 
                 const void* pCodeSection   = nullptr;
                 size_t      codeSectionLen = 0;
-                // TODO There can be more than one code/.text section
+                // TODO We load a symbol here, but we already threw away the SectionMapping
                 //abiProcessor.GetPipelineCode(&pCodeSection, &codeSectionLen);
                 PAL_ASSERT((symbol.size + symbol.value) <= codeSectionLen);
 
@@ -889,6 +889,46 @@ void PipelineUploader::End()
 
         m_pGpuMemory->Unmap();
     }
+}
+
+// =====================================================================================================================
+Result PipelineUploader::GetPipelineSymbolGpuVirtAddr(
+    const AbiProcessor& abiProcessor,
+    Abi::PipelineSymbolType type,
+    Abi::PipelineSymbolEntry* pEntry) const
+{
+    if (!abiProcessor.HasPipelineSymbolEntry(type, pEntry))
+        return Result::NotFound;
+
+    // Compute absolute address
+    gpusize offset;
+    Result result = m_mapping.GetSectionOffset(pEntry->sectionIndex, &offset);
+    if (result != Result::Success)
+        return result;
+
+    pEntry->value += offset;
+
+    return Result::Success;
+}
+
+// =====================================================================================================================
+Result PipelineUploader::GetGenericSymbolGpuVirtAddr(
+    const AbiProcessor& abiProcessor,
+    const char* pName,
+    Abi::GenericSymbolEntry* pEntry) const
+{
+    if (!abiProcessor.HasGenericSymbolEntry(pName, pEntry))
+        return Result::NotFound;
+
+    // Compute absolute address
+    gpusize offset;
+    Result result = m_mapping.GetSectionOffset(pEntry->sectionIndex, &offset);
+    if (result != Result::Success)
+        return result;
+
+    pEntry->value += offset;
+
+    return Result::Success;
 }
 
 } // Pal

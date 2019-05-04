@@ -125,19 +125,28 @@ void PipelineChunkEsGs::LateInit(
     BuildPm4Headers(useLoadIndexPath, loadInfo.usesOnChipGs, loadInfo.esGsLdsSizeRegGs, loadInfo.esGsLdsSizeRegVs);
 
     Abi::PipelineSymbolEntry symbol = { };
-    if (abiProcessor.HasPipelineSymbolEntry(Abi::PipelineSymbolType::EsMainEntry, &symbol))
+    Result result;
+    result = pUploader->GetPipelineSymbolGpuVirtAddr(
+        abiProcessor,
+        Abi::PipelineSymbolType::EsMainEntry,
+        &symbol);
+    if (result == Result::Success)
     {
         m_stageInfoEs.codeLength   = static_cast<size_t>(symbol.size);
-        const gpusize programGpuVa = (pUploader->CodeGpuVirtAddr() + symbol.value);
+        const gpusize programGpuVa = symbol.value;
         PAL_ASSERT(programGpuVa == Pow2Align(programGpuVa, 256));
 
         m_commands.sh.spiShaderPgmLoEs.bits.MEM_BASE = Get256BAddrLo(programGpuVa);
         m_commands.sh.spiShaderPgmHiEs.bits.MEM_BASE = Get256BAddrHi(programGpuVa);
     }
 
-    if (abiProcessor.HasPipelineSymbolEntry(Abi::PipelineSymbolType::EsShdrIntrlTblPtr, &symbol))
+    result = pUploader->GetPipelineSymbolGpuVirtAddr(
+        abiProcessor,
+        Abi::PipelineSymbolType::EsShdrIntrlTblPtr,
+        &symbol);
+    if (result == Result::Success)
     {
-        const gpusize srdTableGpuVa = (pUploader->DataGpuVirtAddr() + symbol.value);
+        const gpusize srdTableGpuVa = symbol.value;
         m_commands.sh.spiShaderUserDataLoEs.bits.DATA = LowPart(srdTableGpuVa);
     }
 
@@ -146,19 +155,27 @@ void PipelineChunkEsGs::LateInit(
         m_stageInfoEs.disassemblyLength = static_cast<size_t>(symbol.size);
     }
 
-    if (abiProcessor.HasPipelineSymbolEntry(Abi::PipelineSymbolType::GsMainEntry, &symbol))
+    result = pUploader->GetPipelineSymbolGpuVirtAddr(
+        abiProcessor,
+        Abi::PipelineSymbolType::GsMainEntry,
+        &symbol);
+    if (result == Result::Success)
     {
         m_stageInfoGs.codeLength   = static_cast<size_t>(symbol.size);
-        const gpusize programGpuVa = (pUploader->CodeGpuVirtAddr() + symbol.value);
+        const gpusize programGpuVa = symbol.value;
         PAL_ASSERT(programGpuVa == Pow2Align(programGpuVa, 256));
 
         m_commands.sh.spiShaderPgmLoGs.bits.MEM_BASE = Get256BAddrLo(programGpuVa);
         m_commands.sh.spiShaderPgmHiGs.bits.MEM_BASE = Get256BAddrHi(programGpuVa);
     }
 
-    if (abiProcessor.HasPipelineSymbolEntry(Abi::PipelineSymbolType::GsShdrIntrlTblPtr, &symbol))
+    result = pUploader->GetPipelineSymbolGpuVirtAddr(
+        abiProcessor,
+        Abi::PipelineSymbolType::GsShdrIntrlTblPtr,
+        &symbol);
+    if (result == Result::Success)
     {
-        const gpusize srdTableGpuVa = (pUploader->DataGpuVirtAddr() + symbol.value);
+        const gpusize srdTableGpuVa = symbol.value;
         m_commands.sh.spiShaderUserDataLoGs.bits.DATA = LowPart(srdTableGpuVa);
     }
 

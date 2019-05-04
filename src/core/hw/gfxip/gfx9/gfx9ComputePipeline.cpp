@@ -223,10 +223,14 @@ Result ComputePipeline::HwlInit(
         SetupSignatureFromElf(metadata, registers);
 
         Abi::PipelineSymbolEntry csProgram  = { };
-        if (abiProcessor.HasPipelineSymbolEntry(Abi::PipelineSymbolType::CsMainEntry, &csProgram))
+        Result result = uploader.GetPipelineSymbolGpuVirtAddr(
+            abiProcessor,
+            Abi::PipelineSymbolType::CsMainEntry,
+            &csProgram);
+        if (result == Result::Success)
         {
             m_stageInfo.codeLength    = static_cast<size_t>(csProgram.size);
-            const gpusize csProgramVa = (csProgram.value + uploader.CodeGpuVirtAddr());
+            const gpusize csProgramVa = csProgram.value;
             PAL_ASSERT(IsPow2Aligned(csProgramVa, 256u));
 
             m_commands.set.computePgmLo.bits.DATA = Get256BAddrLo(csProgramVa);
@@ -234,9 +238,13 @@ Result ComputePipeline::HwlInit(
         }
 
         Abi::PipelineSymbolEntry csSrdTable = { };
-        if (abiProcessor.HasPipelineSymbolEntry(Abi::PipelineSymbolType::CsShdrIntrlTblPtr, &csSrdTable))
+        result = uploader.GetPipelineSymbolGpuVirtAddr(
+            abiProcessor,
+            Abi::PipelineSymbolType::CsShdrIntrlTblPtr,
+            &csSrdTable);
+        if (result == Result::Success)
         {
-            const gpusize csSrdTableVa = (csSrdTable.value + uploader.DataGpuVirtAddr());
+            const gpusize csSrdTableVa = csSrdTable.value;
             m_commands.set.computeUserDataLo.bits.DATA = LowPart(csSrdTableVa);
         }
 

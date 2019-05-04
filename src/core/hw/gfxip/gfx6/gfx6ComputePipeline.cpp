@@ -207,10 +207,14 @@ Result ComputePipeline::HwlInit(
         // internal SRD table addresses:
 
         Abi::PipelineSymbolEntry csProgram  = { };
-        if (abiProcessor.HasPipelineSymbolEntry(Abi::PipelineSymbolType::CsMainEntry, &csProgram))
+        Result result = uploader.GetPipelineSymbolGpuVirtAddr(
+            abiProcessor,
+            Abi::PipelineSymbolType::CsMainEntry,
+            &csProgram);
+        if (result == Result::Success)
         {
             m_stageInfo.codeLength    = static_cast<size_t>(csProgram.size);
-            const gpusize csProgramVa = (csProgram.value + uploader.CodeGpuVirtAddr());
+            const gpusize csProgramVa = csProgram.value;
             PAL_ASSERT(csProgramVa == Pow2Align(csProgramVa, 256));
             PAL_ASSERT(Get256BAddrHi(csProgramVa) == 0);
 
@@ -219,9 +223,13 @@ Result ComputePipeline::HwlInit(
         }
 
         Abi::PipelineSymbolEntry csSrdTable = { };
-        if (abiProcessor.HasPipelineSymbolEntry(Abi::PipelineSymbolType::CsShdrIntrlTblPtr, &csSrdTable))
+        result = uploader.GetPipelineSymbolGpuVirtAddr(
+            abiProcessor,
+            Abi::PipelineSymbolType::CsShdrIntrlTblPtr,
+            &csSrdTable);
+        if (result == Result::Success)
         {
-            const gpusize csSrdTableVa = (csSrdTable.value + uploader.DataGpuVirtAddr());
+            const gpusize csSrdTableVa = csSrdTable.value;
             m_commands.set.computeUserDataLo.bits.DATA = LowPart(csSrdTableVa);
         }
 
