@@ -222,7 +222,9 @@ void Pipeline::DumpPgoData()
 
             // Write profile data
             __llvm_profile_set_filename(expandedFilename);
-            int result = __llvm_profile_dump();
+            // Use write_file instead of dump so the counter does not get set
+            // and we can dump again.
+            int result = __llvm_profile_write_file();
             if (result)
             {
                 printf("Failed to dump profiling data (%d)\n", result);
