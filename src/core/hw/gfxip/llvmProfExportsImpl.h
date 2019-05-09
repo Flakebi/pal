@@ -38,7 +38,8 @@ static uint64_t *CountersFirst = nullptr;
 static uint64_t *CountersLast = nullptr;
 static uint32_t *OrderFileFirst = nullptr;
 // Mark as IR instrumentation
-uint64_t __llvm_profile_raw_version = 4 | (0x1ULL << 56);
+// IMPORTANT: When using LTO, this only works with the gold linker, not with bfd
+__attribute__((externally_visible)) uint64_t __llvm_profile_raw_version = 4 | (0x1ULL << 56);
 
 const __llvm_profile_data *__llvm_profile_begin_data(void) { return DataFirst; }
 const __llvm_profile_data *__llvm_profile_end_data(void) { return DataLast; }
