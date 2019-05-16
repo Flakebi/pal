@@ -263,7 +263,7 @@ Result Pipeline::PerformRelocationsAndUploadToGpuMemory(
     PAL_ASSERT(pUploader != nullptr);
 
     SectionMemoryMap& mapping = pUploader->SectionMapping();
-    Result result = pUploader->Begin(m_pDevice, abiProcessor, metadata, &m_perfDataInfo[0], preferNonLocalHeap, mapping);
+    Result result = pUploader->Begin(m_pDevice, abiProcessor, metadata, &m_perfDataInfo[0], preferNonLocalHeap);
     if (result == Result::Success)
     {
         m_gpuMemSize = pUploader->GpuMemSize();
@@ -680,8 +680,8 @@ Result PipelineUploader::Begin(
     Device*                   pDevice,
     const AbiProcessor&       abiProcessor,
     const CodeObjectMetadata& metadata,
-    PerfDataInfo*             pPerfDataInfoList)
-    bool                           preferNonLocalHeap,
+    PerfDataInfo*             pPerfDataInfoList,
+    bool                      preferNonLocalHeap)
 {
     PAL_ASSERT(pPerfDataInfoList != nullptr);
 
