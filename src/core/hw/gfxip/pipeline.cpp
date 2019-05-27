@@ -453,10 +453,10 @@ Result Pipeline::GetShaderCode(
                         Abi::GetSymbolForStage(Abi::PipelineSymbolType::ShaderMainEntry, pInfo->stageId));
                 PAL_ASSERT(symbol.size == pInfo->codeLength);
 
-                const void* pCodeSection   = nullptr;
-                size_t      codeSectionLen = 0;
-                // TODO We load a symbol here, but we already threw away the SectionMapping
-                //abiProcessor.GetPipelineCode(&pCodeSection, &codeSectionLen);
+                auto elfProcessor = abiProcessor.GetElfProcessor();
+                auto codeSection = elfProcessor->GetSections()->Get(".text");
+                const void* pCodeSection   = codeSection->GetData();
+                size_t      codeSectionLen = codeSection->GetDataSize();
                 PAL_ASSERT((symbol.size + symbol.value) <= codeSectionLen);
 
                 memcpy(pBuffer,
