@@ -35,6 +35,8 @@
 #include "palPipeline.h"
 #include "palPipelineAbiProcessor.h"
 #include "palSectionMemoryMap.h"
+#include <mutex>
+#include <unordered_set>
 
 namespace Pal
 {
@@ -135,12 +137,17 @@ public:
     virtual Util::Abi::ApiHwShaderMapping ApiHwShaderMapping() const override
         { return m_apiHwMapping; }
 
+    // Write profiling data to file for profile-guided optimizations.
+    void DumpPgoData();
+
+    static std::mutex dumper_lock;
+    static std::unordered_set<Pipeline*> pipelines;
+    static bool started_dumper;
+
 protected:
     Pipeline(Device* pDevice, bool isInternal);
 
     bool IsInternal() const { return m_flags.isInternal != 0; }
-    // Write profiling data to file for profile-guided optimizations.
-    void DumpPgoData();
 
     Result PerformRelocationsAndUploadToGpuMemory(
         const AbiProcessor&       abiProcessor,
