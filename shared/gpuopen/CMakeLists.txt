@@ -78,7 +78,7 @@ macro(apply_gpuopen_warnings _target)
 
     # Apply GNU/Clang compatible warnings
     if(NOT "${CMAKE_CXX_COMPILER_ID}" STREQUAL "MSVC")
-        target_compile_options(${_target} PRIVATE -Wall -Wextra -Werror)
+        target_compile_options(${_target} PRIVATE -Wall -Wextra)
     endif()
 
     if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
