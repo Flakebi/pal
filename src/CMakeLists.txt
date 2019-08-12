@@ -178,7 +178,7 @@ target_include_directories(pal PRIVATE ${GLOBAL_ROOT_SRC_DIR}/drivers/inc/asic_r
 
 if(PAL_BUILD_PGO_RT)
     # TODO That's kind of hardcoded, not the best variant
-    target_link_libraries(pal PRIVATE /usr/lib/clang/8.0.0/lib/linux/libclang_rt.profile-x86_64.a)
+    target_link_libraries(pal PRIVATE /usr/lib/clang/8.0.1/lib/linux/libclang_rt.profile-x86_64.a)
 endif()
 
 ### PAL Subprojects ####################################################################################################
