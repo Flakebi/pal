@@ -39,6 +39,9 @@
 #include "palSparseVectorImpl.h"
 #include "palVectorImpl.h"
 
+#include <mutex>
+#include <unordered_set>
+
 namespace Pal
 {
 
@@ -155,6 +158,13 @@ public:
     virtual Util::Abi::ApiHwShaderMapping ApiHwShaderMapping() const override
         { return m_apiHwMapping; }
 
+    // Write profiling data to file for profile-guided optimizations.
+    void DumpPgoData();
+
+    static std::mutex dumper_lock;
+    static std::unordered_set<Pipeline*> pipelines;
+    static bool started_dumper;
+
     UploadFenceToken GetUploadFenceToken() const { return m_uploadFenceToken; }
     uint64 GetPagingFenceVal() const { return m_pagingFenceVal; }
 
@@ -200,6 +210,15 @@ protected:
 
     BoundGpuMemory  m_gpuMem;
     gpusize         m_gpuMemSize;
+
+    // PGO section offsets
+    size_t m_DataFirst;
+    size_t m_DataLast;
+    size_t m_NamesFirst;
+    size_t m_NamesLast;
+    size_t m_CountersFirst;
+    size_t m_CountersLast;
+    size_t m_OrderFileFirst;
 
     void*   m_pPipelineBinary;      // Buffer containing the pipeline binary data (Pipeline ELF ABI).
     size_t  m_pipelineBinaryLen;    // Size of the pipeline binary data, in bytes.
@@ -443,7 +462,9 @@ private:
     Result UploadUsingDma(const SectionAddressCalculator& addressCalc, void** ppMappedPtr);
 
     Device*const m_pDevice;
+public:
     const AbiReader& m_abiReader;
+private:
 
     GpuMemory*  m_pGpuMemory;
     gpusize     m_baseOffset;
@@ -452,7 +473,9 @@ private:
     gpusize     m_prefetchGpuVirtAddr;
     gpusize     m_prefetchSize;
 
+public:
     SectionMemoryMap m_memoryMap;
+private:
     gpusize  m_ctxRegGpuVirtAddr;
     gpusize  m_shRegGpuVirtAddr;
 

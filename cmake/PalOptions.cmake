@@ -87,6 +87,8 @@ macro(pal_options)
     option(PAL_BUILD_DRI3 "Build PAL with DRI3 support?" ON)
     option(PAL_BUILD_WAYLAND "Build PAL with WAYLAND support?" OFF)
 
+    option(PAL_BUILD_PGO_RT  "Build PAL with shader PGO support?" OFF)
+
     # Paths to PAL's dependencies
     set(PAL_METROHASH_PATH ${PROJECT_SOURCE_DIR}/src/util/imported/metrohash CACHE PATH "Specify the path to the MetroHash project.")
     set(   PAL_CWPACK_PATH ${PROJECT_SOURCE_DIR}/src/util/imported/cwpack    CACHE PATH "Specify the path to the CWPack project.")

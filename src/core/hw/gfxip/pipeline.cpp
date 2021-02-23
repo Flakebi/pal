@@ -35,10 +35,45 @@
 
 #include "core/devDriverUtil.h"
 
+#include "util/palSysUtil.h"
+#include <chrono>
+#include <fstream>
+#include <thread>
+#include <vector>
+
+#include "llvmProfExportsImpl.h"
+extern "C"
+{
+    #include "llvmInstrProfiling.h"
+}
+
 using namespace Util;
+
+// Don't use auto initialization of PGO code
+int __llvm_profile_runtime = 0;
 
 namespace Pal
 {
+std::mutex Pipeline::dumper_lock;
+std::unordered_set<Pipeline*> Pipeline::pipelines;
+bool Pipeline::started_dumper = false;
+
+void dump_timer()
+{
+    std::chrono::seconds wait(10);
+    while (true)
+    {
+        std::this_thread::sleep_for(wait);
+        std::ofstream outfile;
+        outfile.open("/tmp/mydriveroutput.txt", std::ios_base::app);
+        outfile << "Dumping pipeline data\n";
+        std::lock_guard<std::mutex> lock(Pipeline::dumper_lock);
+        for (auto pipe : Pipeline::pipelines)
+        {
+            pipe->DumpPgoData();
+        }
+    }
+}
 
 // GPU memory alignment for shader programs.
 constexpr size_t GpuMemByteAlign = 256;
@@ -65,6 +100,13 @@ Pipeline::Pipeline(
     m_pDevice(pDevice),
     m_gpuMem(),
     m_gpuMemSize(0),
+    m_DataFirst(0),
+    m_DataLast(0),
+    m_NamesFirst(0),
+    m_NamesLast(0),
+    m_CountersFirst(0),
+    m_CountersLast(0),
+    m_OrderFileFirst(0),
     m_pPipelineBinary(nullptr),
     m_pipelineBinaryLen(0),
     m_apiHwMapping(),
@@ -81,13 +123,42 @@ Pipeline::Pipeline(
     memset(&m_info, 0, sizeof(m_info));
     memset(&m_shaderMetaData, 0, sizeof(m_shaderMetaData));
     memset(&m_perfDataInfo, 0, sizeof(m_perfDataInfo));
+
+    if (!isInternal)
+    {
+        std::lock_guard<std::mutex> lock(dumper_lock);
+        pipelines.insert(this);
+        if (!started_dumper)
+        {
+            started_dumper = true;
+            std::thread t(dump_timer);
+            t.detach();
+        }
+    }
 }
 
 // =====================================================================================================================
 Pipeline::~Pipeline()
 {
+    if (!m_flags.isInternal)
+    {
+        std::lock_guard<std::mutex> lock(dumper_lock);
+        pipelines.erase(this);
+    }
+
     if (m_gpuMem.IsBound())
     {
+        std::ofstream outfile;
+        outfile.open("/tmp/mydriveroutput.txt", std::ios_base::app);
+        outfile << "Deleting pipeline";
+
+        if (!IsInternal())
+        {
+                        outfile << " with dump";
+            DumpPgoData();
+        }
+        outfile << "\n";
+
         m_pDevice->MemMgr()->FreeGpuMem(m_gpuMem.Memory(), m_gpuMem.Offset());
         m_gpuMem.Update(nullptr, 0);
     }
@@ -103,6 +174,123 @@ Pipeline::~Pipeline()
     m_pDevice->GetPlatform()->GetEventProvider()->LogGpuMemoryResourceDestroyEvent(data);
 
     PAL_SAFE_FREE(m_pPipelineBinary, m_pDevice->GetPlatform());
+}
+
+// =====================================================================================================================
+static void PrintHex(const char* ptr, size_t len)
+{
+    for (size_t i = 0; i < len; i++)
+        printf("0x%02hhx, ", ptr[i]);
+    puts("");
+}
+
+// =====================================================================================================================
+static void PrintHexll(const void* voidptr, size_t length)
+{
+    const unsigned int* ptr = static_cast<const unsigned int*>(voidptr);
+    for (size_t i = 0; i < length / sizeof(*ptr); i++)
+        printf("0x%016x, ", ptr[i]);
+    puts("");
+}
+
+// =====================================================================================================================
+void Pipeline::DumpPgoData()
+{
+    const char* filename = getenv("AMDVLK_PROFILE_INSTR_GEN");
+
+    if (m_DataFirst && filename)
+    {
+        void* pMappedPtr;
+        Result result = m_gpuMem.Map(&pMappedPtr);
+        if (result == Result::Success)
+        {
+            puts("Dumping PGO data");
+
+            // TODO We do not need to upload the names to the GPU, we can use
+            // the local address here (in the pipeline elf).
+
+            // We have to modify the pointers that are stored in the prf_data
+            const __llvm_profile_data* mappedProfData = static_cast<const __llvm_profile_data*>(VoidPtrInc(pMappedPtr, m_DataFirst - m_gpuMem.GpuVirtAddr()));
+            const __llvm_profile_data* mappedProfDataEnd = static_cast<const __llvm_profile_data*>(VoidPtrInc(pMappedPtr, m_DataLast - m_gpuMem.GpuVirtAddr()));
+            // TODO Use PAL vector
+            std::vector<__llvm_profile_data> prof_data(mappedProfData, mappedProfDataEnd);
+
+            uint64 pCountersPtr = reinterpret_cast<uint64>(VoidPtrInc(pMappedPtr, m_CountersFirst - m_gpuMem.GpuVirtAddr()));
+            uint64 pGpuCountersPtr = reinterpret_cast<uint64>(m_gpuMem.GpuVirtAddr() + m_CountersFirst - m_gpuMem.GpuVirtAddr());
+            // Wrap-around on unsigned integers is defined behaviour, so this works.
+            ptrdiff_t ptrDiff = static_cast<ptrdiff_t>(pCountersPtr - pGpuCountersPtr);
+            for (auto& data : prof_data)
+            {
+                data.CounterPtr = VoidPtrInc(data.CounterPtr, ptrDiff);
+            }
+
+            // Replace %i with pipeline id
+            bool isEscaped = false; // If the next character is escaped
+            char expandedFilename[512] = { };
+            size_t j = 0;
+            for (size_t i = 0; j < sizeof(expandedFilename) && filename[i]; i++, j++)
+            {
+                if (isEscaped && filename[i] == 'i')
+                {
+                    j--;
+                    int written = Snprintf(expandedFilename + j,
+                        sizeof(expandedFilename) - j,
+                        "0x%016llX",
+                        m_info.internalPipelineHash.stable);
+                    if (written < 0)
+                    {
+                        printf("Failed to write pipeline hash\n");
+                        return;
+                    }
+                    j += written - 1;
+
+                    continue;
+                }
+
+                expandedFilename[j] = filename[i];
+                if (!isEscaped && filename[i] == '%')
+                    isEscaped = true;
+            }
+
+            if (j >= sizeof(expandedFilename))
+            {
+                printf("Failed to write pipeline hash\n");
+                return;
+            }
+
+            expandedFilename[j] = 0;
+
+            // We access global variables, only one pipeline should be able to do
+            // this simultaneously.
+            MutexAuto lock(&LlvmProfileMutex);
+
+            // Fill pointers with mapped addresses of the sections
+            DataFirst = prof_data.data();
+            DataLast = prof_data.data() + prof_data.size();
+            NamesFirst = static_cast<const char*>(VoidPtrInc(pMappedPtr, m_NamesFirst - m_gpuMem.GpuVirtAddr()));
+            NamesLast = static_cast<const char*>(VoidPtrInc(pMappedPtr, m_NamesLast - m_gpuMem.GpuVirtAddr()));
+            CountersFirst = reinterpret_cast<uint64*>(pCountersPtr);
+            CountersLast = static_cast<uint64*>(VoidPtrInc(pMappedPtr, m_CountersLast - m_gpuMem.GpuVirtAddr()));
+            OrderFileFirst = static_cast<uint32*>(VoidPtrInc(pMappedPtr, m_OrderFileFirst - m_gpuMem.GpuVirtAddr()));
+
+            // Write profile data
+            __llvm_profile_set_filename(expandedFilename);
+            // Use write_file instead of dump so the counter does not get set
+            // and we can dump again.
+            int result = __llvm_profile_write_file();
+            if (result)
+            {
+                printf("Failed to dump profiling data (%d)\n", result);
+            }
+
+            m_gpuMem.Unmap();
+        }
+        else
+        {
+            printf("Failed to map memory\n");
+        }
+
+    }
 }
 
 // =====================================================================================================================
@@ -203,6 +391,40 @@ Result Pipeline::PerformRelocationsAndUploadToGpuMemory(
     if (result == Result::Success)
     {
         result = pUploader->ApplyRelocations();
+    }
+
+    if (result == Result::Success)
+    {
+        if (!IsInternal())
+        {
+            // Set PGO section offsets
+            auto elfReader = pUploader->m_abiReader.GetElfReader();
+            gpusize offset;
+
+            auto section = elfReader.FindSection("__llvm_prf_data");
+            if (section)
+            {
+                const SectionInfo* pMemInfo = pUploader->m_memoryMap.FindSection(section);
+                m_DataFirst = static_cast<size_t>(pMemInfo->GetGpuVirtAddr());
+                m_DataLast = static_cast<size_t>(pMemInfo->GetGpuVirtAddr()) + static_cast<size_t>(elfReader.GetSection(section).sh_size);
+            }
+
+            section = elfReader.FindSection("__llvm_prf_names");
+            if (section)
+            {
+                const SectionInfo* pMemInfo = pUploader->m_memoryMap.FindSection(section);
+                m_NamesFirst = static_cast<size_t>(pMemInfo->GetGpuVirtAddr());
+                m_NamesLast = static_cast<size_t>(pMemInfo->GetGpuVirtAddr()) + static_cast<size_t>(elfReader.GetSection(section).sh_size);
+            }
+
+            section = elfReader.FindSection("__llvm_prf_cnts");
+            if (section)
+            {
+                const SectionInfo* pMemInfo = pUploader->m_memoryMap.FindSection(section);
+                m_CountersFirst = static_cast<size_t>(pMemInfo->GetGpuVirtAddr());
+                m_CountersLast = static_cast<size_t>(pMemInfo->GetGpuVirtAddr()) + static_cast<size_t>(elfReader.GetSection(section).sh_size);
+            }
+        }
     }
 
     if (result == Result::Success)

@@ -168,6 +168,11 @@ function(pal_compile_definitions TARGET)
 
             target_compile_definitions(${TARGET} PRIVATE PAL_HAVE_WAYLAND_PLATFORM=1)
         endif()
+
+        if(PAL_BUILD_PGO_RT)
+            # TODO That's kind of hardcoded, not the best variant
+            target_link_libraries(${TARGET} PRIVATE $ENV{LIBCLANG_RT}/linux/libclang_rt.profile-x86_64.a)
+        endif()
     endif()
 
     if (PAL_BUILD_OSS)
